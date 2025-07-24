@@ -12,9 +12,7 @@ A Streamlit web app that generates standardized PDF documents for side-by-side L
 graph TD
     A[👤 User Upload] --> B[🖥️ Streamlit App]
     B --> C[📄 PDF Generator]
-    C --> D[🔗 Apps Script API]
-    B --> E[☁️ Google Drive]
-    E --> F[📊 Google Sheets]
+    C --> D[🔗 Apps Script API] --> E[☁️ Google Drive] --> F[📊 Google Sheets]
     
     style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     style B fill:#4285f4,color:#fff,stroke:#1565c0,stroke-width:3px
