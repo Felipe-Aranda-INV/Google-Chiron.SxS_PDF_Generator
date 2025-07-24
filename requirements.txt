@@ -1,0 +1,16 @@
+# Core Framework
+streamlit>=1.28.0,<2.0.0
+
+# Image Processing & PDF Generation
+pillow>=10.0.0,<11.0.0
+reportlab>=4.0.4,<5.0.0
+
+# HTTP Requests & API Integration
+requests>=2.31.0,<3.0.0
+
+# Date/Time Utilities
+python-dateutil>=2.8.2,<3.0.0
+
+# 👮
+cryptography>=41.0.0,<42.0.0
+psutil>=5.9.0,<6.0.0
