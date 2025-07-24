@@ -1,0 +1,73 @@
+# ============================================================================
+# SxS PDF Generator - Production Configuration
+# ============================================================================
+
+[global]
+# Global configuration
+developmentMode = false
+showWarningOnDirectExecution = false
+dataFrameSerialization = "arrow"
+disableWatchdogWarning = true
+
+[server]
+# Server configuration
+headless = true
+port = 8501
+baseUrlPath = ""
+
+# Security settings
+enableCORS = false
+enableXsrfProtection = true
+enableStaticServing = true
+
+# File upload limits for PDF generation
+maxUploadSize = 200
+maxMessageSize = 200
+enableWebsocketCompression = true
+
+# Performance optimization
+runOnSave = false
+allowRunOnSave = false
+fastReruns = true
+enforceSamesiteNone = false
+sessionStateEnabled = true
+
+[browser]
+# Browser configuration
+serverAddress = "0.0.0.0"
+gatherUsageStats = false
+serverPort = 8501
+showErrorDetails = false
+
+[theme]
+primaryColor = "#4285f4"           # Google blue
+backgroundColor = "#ffffff"        # White background
+secondaryBackgroundColor = "#f8f9fa"  # Light gray
+textColor = "#1f2937"              # Dark gray
+font = "sans serif"
+base = "light"
+
+[client]
+# Client configuration
+showErrorDetails = false
+toolbarMode = "minimal"
+caching = true
+
+[runner]
+# Runner configuration
+magicEnabled = true
+installTracer = false
+fixMatplotlib = true
+enforceSerializableSessionState = true
+postScriptGC = true
+fastReruns = true
+
+[logger]
+# Logger configuration
+level = "INFO"
+messageFormat = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+
+[deprecation]
+# Deprecation warnings
+showPyplotGlobalUse = false
+showfileUploaderEncoding = false
