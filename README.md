@@ -10,9 +10,13 @@ A Streamlit web app that generates standardized PDF documents for side-by-side L
 
 ```mermaid
 graph TD
-    A[👤 User Upload] --> B[🖥️ Streamlit App]
+    A[👤 User Upload] ~~~ B[🖥️ Streamlit App]
+    A --> B
     B --> C[📄 PDF Generator]
-    D[🔗 Apps Script API] --> E[☁️ Google Drive] --> F[📊 Google Sheets]
+    C --> E[🔗 Apps Script API]
+    E --> D[☁️ Google Drive]
+    E --> F[📊 Google Sheets]
+    D -.-> F
     
     style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     style B fill:#4285f4,color:#fff,stroke:#1565c0,stroke-width:3px
