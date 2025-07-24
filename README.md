@@ -1,16 +1,8 @@
 # 🖨️ SxS PDF Generator
 
-<div align="center">
-
-![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)
-![Google Apps Script](https://img.shields.io/badge/Google%20Apps%20Script-4285F4?style=for-the-badge&logo=google&logoColor=white)
-![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
-
-</div>
-
 A Streamlit web app that generates standardized PDF documents for side-by-side LLM model comparisons, with automated Google Sheets integration.
 
-**Designed for AIT Inv agents working on Google's Chiron EDU project for SxS human evaluations.**
+• **Designed for AIT Inv agents working on Google's Chiron EDU project for SxS human evaluations.**
 
 ---
 
@@ -20,9 +12,9 @@ A Streamlit web app that generates standardized PDF documents for side-by-side L
 graph TD
     A[👤 User Upload] --> B[🖥️ Streamlit App]
     B --> C[📄 PDF Generator]
-    C --> D[☁️ Google Drive]
-    B --> E[🔗 Apps Script API]
-    E --> F[📊 Google Sheets]
+    C --> E[🔗 Apps Script API]
+    E --> D[☁️ Google Drive] --> F[📊 Google Sheets]
+    
     
     style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     style B fill:#4285f4,color:#fff,stroke:#1565c0,stroke-width:3px
@@ -34,14 +26,14 @@ graph TD
 
 ---
 
-## ✨ Features
+## </> Features
 
 | Feature | Description |
 |---------|-------------|
-| 🔒 **Secure Workflow** | Anti-exploitation protection with session locking |
-| 📋 **Professional PDFs** | Google Slides 16:9 format with company branding |
+| 🎯 **Image Reordering** | Drag-and-drop interface for eval screenshots organization |
+| 📋 **Standardized PDFs** | Google Slides 16:9 format with company branding |
 | 🔄 **Automated Integration** | Direct upload to Google Drive and Sheets logging |
-| 🎯 **Image Reordering** | Drag-and-drop interface for screenshot organization |
+| 🔒 **Secure Workflow** | Anti-exploitation protection with session locking |
 | ✅ **Validation** | Authorized user and LLM combo verification with fallback support |
 
 ---
@@ -50,7 +42,7 @@ graph TD
 
 ```bash
 # 1. Configure
-echo "webhook_url = 'your-apps-script-url'" > .streamlit/secrets.toml
+inside .streamlit/secrets.toml > "webhook_url = 'your-apps-script-url'"
 
 # 2. Install dependencies
 pip install -r requirements.txt
@@ -59,7 +51,7 @@ pip install -r requirements.txt
 streamlit run sxs_pdf_generator.py
 ```
 
-**Or deploy to Streamlit Cloud** → Navigate through the 4-step guided workflow
+### Better yet: **Deploy to Streamlit Cloud** → Navigate through the 4-step guided workflow
 
 ---
 
@@ -98,6 +90,9 @@ flowchart LR
 
 **Production v2** • **Chiron EDU** • **FA**
 
-![Made with ❤️](https://img.shields.io/badge/Made%20with-❤️-red?style=for-the-badge)
+![Streamlit](https://img.shields.io/badge/Streamlit-FF4B4B?style=for-the-badge&logo=streamlit&logoColor=white)
+![Google Apps Script](https://img.shields.io/badge/Google%20Apps%20Script-4285F4?style=for-the-badge&logo=google&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+
 
 </div>
