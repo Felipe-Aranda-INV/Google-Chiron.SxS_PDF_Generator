@@ -10,7 +10,7 @@ A Streamlit web app that generates standardized PDF documents for side-by-side L
 
 ```mermaid
 graph TD
-    A[👤 User Upload] ~~~ B[🖥️ Streamlit App]
+    A[👤 User Upload] --> B[🖥️ Streamlit App]
     A --> B
     B --> C[📄 PDF Generator]
     C --> E[🔗 Apps Script API]
