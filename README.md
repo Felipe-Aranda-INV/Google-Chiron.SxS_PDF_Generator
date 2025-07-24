@@ -13,7 +13,7 @@ graph TD
     A[👤 User Upload] --> B[🖥️ Streamlit App]
     B --> C[📄 PDF Generator]
     C --> E[🔗 Apps Script API]
-    E --> D[☁️ Google Drive] --> F[📊 Google Sheets]
+    D[☁️ Google Drive] --> F[📊 Google Sheets]
     
     
     style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px
