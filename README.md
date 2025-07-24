@@ -12,9 +12,9 @@ A Streamlit web app that generates standardized PDF documents for side-by-side L
 graph TD
     A[👤 User Upload] --> B[🖥️ Streamlit App]
     B --> C[📄 PDF Generator]
-    C --> E[🔗 Apps Script API]
-    D[☁️ Google Drive] --> D[📊 Google Sheets]
-    
+    C --> D[🔗 Apps Script API]
+    B --> E[☁️ Google Drive]
+    E --> F[📊 Google Sheets]
     
     style A fill:#e1f5fe,stroke:#01579b,stroke-width:2px
     style B fill:#4285f4,color:#fff,stroke:#1565c0,stroke-width:3px
@@ -40,18 +40,19 @@ graph TD
 
 ## 🚀 Quick Start
 
+### **Deploy to Streamlit Cloud** → Navigate through the 4-step guided workflow
+
 ```bash
-# 1. Configure
+# 1. [Important] Configure
 inside .streamlit/secrets.toml > "webhook_url = 'your-apps-script-url'"
 
-# 2. Install dependencies
+To run locally:
+# 2. Install dependencies 
 pip install -r requirements.txt
 
-# 3. Run locally
+# 3. Run
 streamlit run sxs_pdf_generator.py
 ```
-
-### Better yet: **Deploy to Streamlit Cloud** → Navigate through the 4-step guided workflow
 
 ---
 
