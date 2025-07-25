@@ -1085,6 +1085,10 @@ class UIComponents:
     @staticmethod
     def is_step_completed(step_name: str) -> bool:
         """Check if a workflow step is completed."""
+        # Help is not a completable step
+        if step_name == "Help":
+            return False
+            
         completion_checks = {
             "Metadata Input": ['question_id', 'prompt_text', 'model1', 'model2'],
             "Image Upload": ['model1_images', 'model2_images'],
@@ -2039,7 +2043,7 @@ class PageManager:
         
         #### 1️⃣ Metadata Input
         - Enter the **Question ID** (🛈 top right in CrC task)
-        - Enter your **authorized email address**
+        - Enter your **authorized email alias address** used in CrC
         - Enter the **Initial Prompt** used for both models
         - Optionally upload a **Prompt Image**
         - Both Question ID and email are validated automatically
@@ -2067,18 +2071,6 @@ class PageManager:
         3. **First Model Screenshots**: One image per slide
         4. **Second Model Brand Page**: Model name with brand styling
         5. **Second Model Screenshots**: One image per slide
-        
-        ### 🎨 Brand Recognition
-        - **Google/Gemini Models**: Blue styling (#4285f4)
-        - **OpenAI Models**: Green styling (#10a37f)
-        - **Anthropic Models**: Orange styling (#d97706)
-        - **Meta Models**: Blue styling (#1877f2)
-        
-        ### 🔒 Security Features
-        - **Single submission per session** - prevents duplicate uploads
-        - **Workflow locking** - completed sessions cannot be modified
-        - **Session tracking** - unique IDs for audit trails
-        - **Integrated validation** - SOT-based model recognition
         """)
     
     @staticmethod
@@ -2098,19 +2090,20 @@ class PageManager:
         - **"Already submitted" error**: Session is locked after completion - start new session
         - **Submit button disabled**: Complete Drive upload first
         
-        #### Security-Related Issues:
-        - **"Submission in progress"**: Wait for current submission to complete
-        - **Multiple clicks not working**: System prevents duplicate submissions
-        - **Session locked**: Start new session for additional comparisons
-        
         #### Best Practices:
         - Use high-resolution screenshots (1920x1080 recommended)
-        - Compress large images before upload using online tools
         - Ensure images are in supported formats (PNG, JPG, JPEG)
         - Complete all validations in Step 1 before proceeding
         - **Do not refresh page during uploads** - may cause session issues
         - **Complete workflow in one session** - avoid leaving partially completed
         - **Click Submit only once** - system will show progress indicator
+        - Compress large images before upload using online tools if needed
+         
+        #### Security-Related Issues:
+        - **"Submission in progress"**: Wait for current submission to complete
+        - **Multiple clicks not working**: System prevents duplicate submissions
+        - **Session locked**: Start new session for additional comparisons
+                    
         """)
     
     @staticmethod
@@ -2119,30 +2112,15 @@ class PageManager:
         st.markdown("""
         ### 📊 Examples
         
-        #### SOT-Based Model Recognition:
-        The app automatically recognizes model combinations from your SOT spreadsheet:
-        - **Question ID** → **Task ID extraction** → **SOT lookup** → **Model pairing**
+        #### Google SxS Model Recognition:
+        This app automatically recognizes model combinations from tasks assigned in Google Crowd Compute (CrC):
+        - **Question ID** → **Model pairing**
         - Example: `coach_P128631...` → `Bard 2.5 Pro vs. AIS 2.5 PRO`
         
-        #### Question ID → Task ID Mapping:
-        **Sample Question ID:**
+        #### Sample Question ID:
         ```
-        a5009505a2b411ff7b171226bb33306a+bard_data+coach_P128631_quality_sxs_e2e_experience_learning_and_academic_help_frozen_pool_human_eval_en-US-50+INTERNAL+en:18019373568084263285
+        a5009505a2b411ff7b174326bb33306a+bard_data+coach_P128631_quality_sxs_e2e_experience_learning_and_academic_help_frozen_pool_human_eval_en-US-50+INTERNAL+en:18019373568084263285
         ```
-        **Extracted Task ID:**
-        ```
-        coach_P128631_quality_sxs_e2e_experience_learning_and_academic_help_frozen_pool_human_eval_en-US-50
-        ```
-        **Auto-populated from SOT:**
-        - Language: `en-US`
-        - Model Comparison: `Bard 2.5 Pro vs. AIS 2.5 Pro`
-        - Project Type: `Learning & Academic Help`
-        
-        #### Brand Recognition Examples:
-        - **"Bard 2.5 Pro"** → Google Blue + "Gemini" brand
-        - **"AIS 2.5 PRO"** → Google Blue + "Google AI Studio" brand  
-        - **"cGPT o3"** → OpenAI Green + "OpenAI" brand
-        - **"Claude"** → Anthropic Orange + "Anthropic" brand
         
         #### Sample Email Formats:
         ```
@@ -2182,7 +2160,7 @@ class PageManager:
                 st.rerun()
 
 # ============================================================================
-# SIDEBAR COMPONENTS (SIMPLIFIED)
+# SIDEBAR COMPONENTS
 # ============================================================================
 
 class SidebarManager:
@@ -2316,7 +2294,7 @@ def main():
     <div class="main-header">
         <h1>🖨️ SxS Model Comparison PDF Generator</h1>
         <p>Generate standardized PDF documents for side-by-side LLM comparisons</p>
-        <small style="opacity: 0.8;">v2.1.0 - Production Edition with Enhanced Security</small>
+        <small style="opacity: 0.5;">Chiron EDU</small>
     </div>
     """, unsafe_allow_html=True)
     
