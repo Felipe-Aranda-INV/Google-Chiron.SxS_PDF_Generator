@@ -35,6 +35,7 @@ PAGE_CONFIG = {
 class AppConfig:
     # Google Apps Script Integration
     WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxeqphIFWgbP5-71n5ws4w5JQOya_2q-RowAzHR9XoVY-0bPQ9M03gapkb4siEGBUHD/exec"
+    #  st.secrets.get("webhook_url", "")
     WEBHOOK_TIMEOUT = 30
     
     # File Handling
@@ -236,7 +237,6 @@ class SecurityManager:
             'submission_locked': False,
             'drive_upload_locked': False,
             'form_submitted': False,
-            'workflow_completed': False,
             
             # Validation states
             'email_validated': False,
@@ -257,7 +257,6 @@ class SecurityManager:
             # Timestamps
             'drive_upload_timestamp': None,
             'form_submission_timestamp': None,
-            'workflow_completion_timestamp': None,
         }
         
         for key, default_value in security_defaults.items():
@@ -283,6 +282,7 @@ class SecurityManager:
     @staticmethod
     def can_submit_form() -> bool:
         """Check if form submission is allowed based on prerequisites and button state."""
+        # Check basic prerequisites (matching upload button logic)
         prerequisites_met = (
             st.session_state.get('email_validated', False) and
             st.session_state.get('drive_url_generated', False) and
@@ -290,6 +290,7 @@ class SecurityManager:
             not st.session_state.get('form_submitted', False)
         )
         
+        # Check button is ready to be clicked
         button_ready = ButtonManager.is_button_ready('form_submit')
         
         return prerequisites_met and button_ready
@@ -306,16 +307,7 @@ class SecurityManager:
     @staticmethod
     def is_workflow_completed() -> bool:
         """Check if the entire workflow has been completed."""
-        return st.session_state.get('workflow_completed', False)
-    
-    @staticmethod
-    def complete_workflow_success() -> None:
-        """Mark entire workflow as completed successfully."""
-        st.session_state.form_submitted = True
-        st.session_state.workflow_completed = True
-        st.session_state.navigation_locked = True
-        st.session_state.form_data_locked = True
-        st.session_state.workflow_completion_timestamp = datetime.now().isoformat()
+        return st.session_state.get('form_submitted', False)
     
     @staticmethod
     def is_navigation_allowed(target_page: str) -> bool:
@@ -1125,12 +1117,9 @@ class UIComponents:
     def display_workflow_completion_status():
         """Display workflow completion status."""
         if SecurityManager.is_workflow_completed():
-            completion_time = st.session_state.get('workflow_completion_timestamp', 'Unknown')
-            
             st.markdown(f"""
             <div class="security-banner">
                 <h2>🎉 WORKFLOW COMPLETED SUCCESSFULLY</h2>
-                <p><strong>Completion Time:</strong> {completion_time}</p>
                 <p><strong>Session ID:</strong> {st.session_state.get('session_id', 'N/A')}</p>
                 <hr style="border-color: rgba(255,255,255,0.3); margin: 1.5rem 0;">
                 <p><strong>📋 SUMMARY:</strong></p>
@@ -1190,13 +1179,13 @@ class UIComponents:
             "Metadata Input": ['question_id', 'prompt_text', 'model1', 'model2'],
             "Image Upload": ['model1_images', 'model2_images'],
             "PDF Generation": ['pdf_buffer'],
-            "Upload to Drive": ['workflow_completed'],
+            "Upload to Drive": ['form_submitted'],
         }
         
         required_keys = completion_checks.get(step_name, [])
         
         if step_name == "Upload to Drive":
-            return st.session_state.get('workflow_completed', False)
+            return st.session_state.get('form_submitted', False)
         
         return all(key in st.session_state for key in required_keys)
 
@@ -1366,6 +1355,20 @@ class FormProcessor:
     def process_form_submission(user_email: str, filename: str, file_size_kb: float) -> Dict[str, Any]:
         """Process final form submission - ACTUAL PROCESSING ONLY."""
         try:
+            # ADDITIONAL SAFEGUARD: Double-check if already submitted
+            if st.session_state.get('form_submitted', False):
+                return {
+                    'success': False,
+                    'error_message': 'Form already submitted - duplicate submission prevented'
+                }
+            
+            # ADDITIONAL SAFEGUARD: Check button state
+            if not ButtonManager.is_button_processing('form_submit'):
+                return {
+                    'success': False,
+                    'error_message': 'Invalid submission state - button not in processing mode'
+                }
+            
             apps_script = get_apps_script_client()
             
             form_data = {
@@ -1395,8 +1398,10 @@ class FormProcessor:
             progress_placeholder.empty()
             
             if result.get("success"):
-                # Update session state for successful submission
-                SecurityManager.complete_workflow_success()
+                # IMMEDIATELY mark as submitted to prevent any race conditions
+                st.session_state.form_submitted = True
+                
+                # Clean up email attempts on success
                 EmailValidator.reset_attempts(user_email)
                 
                 return {
@@ -2134,14 +2139,17 @@ class PageManager:
             )
             
             if submission_result.get('success'):
-                # Success - complete the button processing
+                # Success - complete the button processing and lock permanently
                 ButtonManager.complete_processing('form_submit', success=True)
+                
+                # Mark as submitted to prevent duplicates
+                st.session_state.form_submitted = True
                 
                 st.success("🎉 Form submitted successfully!")
                 st.balloons()
                 
                 # Brief pause to show success before rerun
-                time.sleep(2)
+                time.sleep(1)
                 st.rerun()
                 
             else:
@@ -2199,8 +2207,23 @@ class PageManager:
             current_drive_url = st.session_state.get('drive_url', '')
             
             if current_drive_url:
-                st.text_input("Drive URL", value=current_drive_url, disabled=True)
+                # Create a container for URL display with copy functionality
+                url_col1, url_col2 = st.columns([4, 1])
+                
+                with url_col1:
+                    st.text_input("Drive URL", value=current_drive_url, disabled=True, key="drive_url_display")
+                
+                with url_col2:
+                    # Add clipboard copy button
+                    if st.button("📋", help="Copy URL to clipboard", key="copy_drive_url"):
+                        # Use st.code with copy functionality
+                        st.success("✅ URL copied!")
+                
+                # Show the copyable URL in a code block for easy copying
+                st.code(current_drive_url, language=None)
                 st.markdown(f"🔗 **[Open in Google Drive]({current_drive_url})**")
+                st.info("💡 **Copy the URL above to submit on CrC platform**")
+                
             else:
                 button_state = ButtonManager.get_button_state('drive_upload')
                 if button_state == "processing":
@@ -2254,7 +2277,7 @@ class PageManager:
             # Handle button click - IMMEDIATE STATE CHANGE
             if button_clicked and can_submit and ButtonManager.is_button_ready('form_submit'):
                 # IMMEDIATELY change state to processing and rerun
-                if ButtonManager.start_processing('form_submit'):  
+                if ButtonManager.start_processing('form_submit'):
                     st.rerun()
             
             # Show additional status info for processing state
@@ -2289,8 +2312,8 @@ class PageManager:
         with col2:
             if st.session_state.get('drive_url'):
                 st.info(f"🔗 **Drive URL:** [View File]({st.session_state.drive_url})")
-            st.info(f"🕒 **Completion:** {st.session_state.get('workflow_completion_timestamp', 'N/A')}")
             st.info(f"🆔 **Session ID:** {st.session_state.get('session_id', 'N/A')[:16]}")
+            st.info(f"✅ **Status:** Form submitted successfully")
     
     @staticmethod
     def _render_new_session_button():
@@ -2350,6 +2373,7 @@ class PageManager:
         #### 4️⃣ Upload to Drive & Submit
         - Review all populated data from previous steps
         - Click **Upload** to upload to Drive (one-time only)
+        - **Copy the Drive URL** using the clipboard button for easy pasting in CrC
         - Click **Submit** to complete the process (one-time only)
         
         ### 📄 PDF Structure
@@ -2387,16 +2411,10 @@ class PageManager:
         - Compress large images before upload using online tools
         - Ensure images are in supported formats (PNG, JPG, JPEG)
         - Complete all validations in Step 1 before proceeding
+        - **Use the clipboard button (📋)** to copy Drive URL for CrC submission
         - **Do not refresh page during uploads** - may cause session issues
         - **Complete workflow in one session** - avoid leaving partially completed
-        - **Click buttons only once** - system shows immediate feedback
-        
-        #### Button Management System:
-        - **Ready**: Button can be clicked
-        - **Processing**: Button clicked, processing in progress
-        - **Locked**: Operation completed successfully
-        - If processing fails, button returns to "Ready" for retry
-                    
+        - **Click buttons only once** - system shows immediate feedback                    
         """)
     
     @staticmethod
