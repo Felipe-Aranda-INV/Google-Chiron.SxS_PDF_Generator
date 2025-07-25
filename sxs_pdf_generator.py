@@ -48,7 +48,7 @@ class AppConfig:
     PDF_SAFE_MARGIN = 0.25 * inch
     
     # Security
-    MAX_SESSION_DURATION = 3600  # 1 hour in seconds
+    MAX_SESSION_DURATION = 3600
     MAX_EMAIL_ATTEMPTS = 10
 
 
@@ -124,7 +124,7 @@ class ModelBrandManager:
 # ============================================================================
 
 class SecurityManager:
-    """Centralized security and session management."""
+    """Enhanced security manager with proper button state integration."""
     
     @staticmethod
     def initialize_session_state() -> None:
@@ -132,7 +132,6 @@ class SecurityManager:
         security_defaults = {
             # Core workflow locks
             'submission_locked': False,
-            'submitting_in_progress': False,
             'drive_upload_locked': False,
             'form_submitted': False,
             'workflow_completed': False,
@@ -162,6 +161,25 @@ class SecurityManager:
         for key, default_value in security_defaults.items():
             if key not in st.session_state:
                 st.session_state[key] = default_value
+    
+    @staticmethod
+    def can_upload_to_drive() -> bool:
+        """Check if drive upload is allowed."""
+        return (st.session_state.get('email_validated', False) and 
+                st.session_state.get('pdf_generated', False) and
+                not st.session_state.get('drive_upload_locked', False) and
+                not ButtonManager.is_button_processing('drive_upload') and
+                not ButtonManager.is_button_locked('drive_upload'))
+    
+    @staticmethod
+    def can_submit_form() -> bool:
+        """Check if form submission is allowed."""
+        return (st.session_state.get('email_validated', False) and
+                st.session_state.get('drive_url_generated', False) and
+                bool(st.session_state.get('drive_url', '')) and
+                not st.session_state.get('form_submitted', False) and
+                not ButtonManager.is_button_processing('form_submit') and
+                not ButtonManager.is_button_locked('form_submit'))
     
     @staticmethod
     def is_session_expired() -> bool:
@@ -296,18 +314,23 @@ class AppsScriptClient:
         })
     
     def upload_pdf(self, pdf_buffer: io.BytesIO, filename: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
-        """Upload PDF to Google Drive."""
+        """Upload PDF to Google Drive with improved state management."""
+        
+        # Check if upload is already permanently locked
         if st.session_state.get('drive_upload_locked', False):
             return {"success": False, "message": "Drive upload already completed"}
         
+        # Validate file size
         pdf_buffer.seek(0)
         pdf_data = pdf_buffer.read()
         
         if len(pdf_data) > AppConfig.MAX_FILE_SIZE_BYTES:
             return {"success": False, "message": f"File too large (max {AppConfig.MAX_FILE_SIZE_MB}MB)"}
         
+        # Prepare upload data
         pdf_base64 = base64.b64encode(pdf_data).decode('utf-8')
         
+        # Make the upload request
         result = self._make_request({
             "action": "upload_pdf",
             "pdf_base64": pdf_base64,
@@ -315,6 +338,7 @@ class AppsScriptClient:
             "metadata": metadata
         })
         
+        # Handle success - lock permanently and set timestamp
         if result.get("success"):
             st.session_state.drive_upload_locked = True
             st.session_state.drive_upload_timestamp = datetime.now().isoformat()
@@ -468,6 +492,59 @@ class Utils:
             return None, None
         except Exception:
             return None, None
+        
+class ButtonManager:
+    """Centralized button state management with immediate locking."""
+    
+    @staticmethod
+    def is_button_locked(button_id: str) -> bool:
+        """Check if a specific button is locked."""
+        return st.session_state.get(f"{button_id}_locked", False)
+    
+    @staticmethod
+    def is_button_processing(button_id: str) -> bool:
+        """Check if a specific button is currently processing."""
+        return st.session_state.get(f"{button_id}_processing", False)
+    
+    @staticmethod
+    def lock_button(button_id: str) -> None:
+        """Lock a button permanently."""
+        st.session_state[f"{button_id}_locked"] = True
+        st.session_state[f"{button_id}_processing"] = False
+    
+    @staticmethod
+    def start_processing(button_id: str) -> bool:
+        """Start processing for a button. Returns False if already processing."""
+        if ButtonManager.is_button_processing(button_id) or ButtonManager.is_button_locked(button_id):
+            return False
+        
+        st.session_state[f"{button_id}_processing"] = True
+        return True
+    
+    @staticmethod
+    def stop_processing(button_id: str, success: bool = False) -> None:
+        """Stop processing for a button."""
+        st.session_state[f"{button_id}_processing"] = False
+        if success:
+            ButtonManager.lock_button(button_id)
+    
+    @staticmethod
+    def reset_button(button_id: str) -> None:
+        """Reset button state (for debugging/retry)."""
+        if f"{button_id}_locked" in st.session_state:
+            del st.session_state[f"{button_id}_locked"]
+        if f"{button_id}_processing" in st.session_state:
+            del st.session_state[f"{button_id}_processing"]
+    
+    @staticmethod
+    def get_button_state(button_id: str) -> str:
+        """Get current button state as string."""
+        if ButtonManager.is_button_locked(button_id):
+            return "locked"
+        elif ButtonManager.is_button_processing(button_id):
+            return "processing"
+        else:
+            return "ready"
 
 # ============================================================================
 # PDF GENERATION CLASS
@@ -898,11 +975,11 @@ class UIComponents:
         <style>
             .main-header {
                 text-align: center;
-                padding: 2rem 0;
+                padding: 1rem 0;
                 background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%);
                 color: white;
                 border-radius: 10px;
-                margin-bottom: 2rem;
+                margin-bottom: 1rem;
             }
             
             .step-indicator {
@@ -1192,13 +1269,73 @@ class FormProcessor:
         except Exception as e:
             st.error(f"Validation error: {str(e)}")
             return True, "Question ID accepted", {}
-    
+        
+
+    def handle_drive_upload_processing(filename: str):
+        """Handle drive upload processing - called after button state is set."""
+        
+        # Only process if we're in processing state
+        if not ButtonManager.is_button_processing('drive_upload'):
+            return
+        
+        # Show processing feedback
+        with st.spinner("📤 Uploading to Google Drive..."):
+            try:
+                # Process the upload
+                upload_result = FormProcessor.process_drive_upload_with_details(
+                    st.session_state.user_email, filename
+                )
+                
+                if upload_result and upload_result.get('success'):
+                    drive_url = upload_result.get('drive_url', '')
+                    
+                    if drive_url:
+                        # Success - update session state
+                        st.session_state.drive_url = drive_url
+                        st.session_state.drive_url_generated = True
+                        st.session_state.drive_upload_locked = True
+                        
+                        # Lock button permanently
+                        ButtonManager.stop_processing('drive_upload', success=True)
+                        
+                        st.success("✅ Upload successful!")
+                        st.success(f"🔗 Drive URL: {drive_url}")
+                        
+                        # Rerun to update UI
+                        time.sleep(1)  # Brief pause to show success message
+                        st.rerun()
+                    else:
+                        # No URL received
+                        ButtonManager.stop_processing('drive_upload', success=False)
+                        st.error("❌ Upload succeeded but no Drive URL received")
+                else:
+                    # Upload failed
+                    ButtonManager.stop_processing('drive_upload', success=False)
+                    error_msg = upload_result.get('error_message', 'Unknown error') if upload_result else 'Upload failed'
+                    st.error(f"❌ Upload failed: {error_msg}")
+                    
+            except Exception as e:
+                # Handle exceptions
+                ButtonManager.stop_processing('drive_upload', success=False)
+                st.error(f"❌ Upload error: {str(e)}")
+
+
     @staticmethod
-    def process_drive_upload(user_email: str, filename: str) -> Optional[str]:
-        """Process PDF upload to Google Drive."""
+    def process_drive_upload_with_details(user_email: str, filename: str) -> Dict[str, Any]:
+        """Process PDF upload to Google Drive with detailed response handling."""
+        
+        # Early checks
         if st.session_state.get('drive_upload_locked', False):
             st.error("🔒 Drive upload already completed for this session")
-            return st.session_state.get('drive_url', '')
+            return {
+                'success': True,
+                'drive_url': st.session_state.get('drive_url', ''),
+                'from_cache': True
+            }
+        
+        if not st.session_state.get('drive_upload_in_progress', False):
+            st.error("🚫 Upload not properly initiated")
+            return {'success': False, 'error_message': 'Upload not properly initiated'}
         
         try:
             apps_script = get_apps_script_client()
@@ -1212,65 +1349,101 @@ class FormProcessor:
                 'session_id': st.session_state.get('session_id', 'unknown')
             }
             
-            upload_result = apps_script.upload_pdf(st.session_state.pdf_buffer, filename, metadata)
+            # Show detailed progress
+            with st.spinner("📤 Uploading to Google Drive..."):
+                upload_result = apps_script.upload_pdf(st.session_state.pdf_buffer, filename, metadata)
+            
+            # Debug: Show the raw response structure
+            st.write("🔍 **Debug - Upload Response:**")
+            st.json(upload_result)
             
             if upload_result.get("success"):
-                drive_url = upload_result.get("data", {}).get("drive_url", "")
-                st.session_state.drive_url = drive_url
-                st.session_state.drive_url_generated = True
-                return drive_url
+                # Extract drive URL with multiple fallback methods
+                drive_url = None
+                
+                # Method 1: Standard structure
+                if upload_result.get("data", {}).get("drive_url"):
+                    drive_url = upload_result["data"]["drive_url"]
+                
+                # Method 2: Direct in response
+                elif upload_result.get("drive_url"):
+                    drive_url = upload_result["drive_url"]
+                
+                # Method 3: Check for shareable_url
+                elif upload_result.get("data", {}).get("shareable_url"):
+                    drive_url = upload_result["data"]["shareable_url"]
+                
+                if drive_url:
+                    return {
+                        'success': True,
+                        'drive_url': drive_url,
+                        'full_response': upload_result
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error_message': 'Drive URL not found in response',
+                        'full_response': upload_result
+                    }
             else:
-                st.error(f"Drive upload failed: {upload_result.get('message')}")
-                return None
+                error_message = upload_result.get('message', 'Unknown API error')
+                return {
+                    'success': False,
+                    'error_message': error_message,
+                    'full_response': upload_result
+                }
                 
         except Exception as e:
-            st.error(f"Drive upload error: {str(e)}")
-            return None
+            return {
+                'success': False,
+                'error_message': f"Exception during upload: {str(e)}",
+                'exception_type': type(e).__name__
+            }
+
+
     
     @staticmethod
-    def process_form_submission(user_email: str, filename: str, file_size_kb: float) -> bool:
-        """Process final form submission with proper locking."""
-        # Check if submission can start (immediate locking)
-        if not SecurityManager.start_submission():
-            st.error("🔒 Submission already in progress or completed")
-            return False
+    def handle_form_submission_processing(filename: str, file_size_kb: float):
+        """Handle form submission processing - called after button state is set."""
         
-        try:
-            apps_script = get_apps_script_client()
-            
-            form_data = {
-                'user_email': user_email,
-                'drive_url': st.session_state.get('drive_url', ''),
-                'question_id': st.session_state.question_id,
-                'language': st.session_state.get('sot_language', ''),
-                'project_type': st.session_state.get('sot_project_type', ''),
-                'prompt_text': st.session_state.prompt_text,
-                'has_prompt_image': bool(st.session_state.get('prompt_image')),
-                'model1': st.session_state.model1,
-                'model1_image_count': len(st.session_state.model1_images),
-                'model2': st.session_state.model2,
-                'model2_image_count': len(st.session_state.model2_images),
-                'pdf_filename': filename,
-                'file_size_kb': file_size_kb,
-                'session_id': st.session_state.get('session_id', 'unknown')
-            }
-            
-            result = apps_script.log_submission(form_data)
-            success = result.get("success", False)
-            
-            if success:
-                SecurityManager.complete_submission_success()
-                EmailValidator.reset_attempts(user_email)
-                return True
-            else:
-                SecurityManager.fail_submission()
-                st.error(f"❌ Submission failed: {result.get('message', 'Unknown error')}")
-                return False
+        # Only process if we're in processing state
+        if not ButtonManager.is_button_processing('form_submit'):
+            return
+        
+        # Show processing feedback
+        with st.spinner("📋 Submitting form... Please wait..."):
+            try:
+                # Process the form submission
+                success = FormProcessor.process_form_submission(
+                    st.session_state.user_email, filename, file_size_kb
+                )
                 
-        except Exception as e:
-            SecurityManager.fail_submission()
-            st.error(f"Submission error: {str(e)}")
-            return False
+                if success:
+                    # Success - update states
+                    st.session_state.form_submitted = True
+                    st.session_state.workflow_completed = True
+                    st.session_state.navigation_locked = True
+                    st.session_state.form_data_locked = True
+                    st.session_state.workflow_completion_timestamp = datetime.now().isoformat()
+                    
+                    # Lock button permanently
+                    ButtonManager.stop_processing('form_submit', success=True)
+                    
+                    st.success("🎉 Form submitted successfully!")
+                    st.balloons()
+                    
+                    # Rerun to update UI after brief pause
+                    time.sleep(2)
+                    st.rerun()
+                else:
+                    # Submission failed
+                    ButtonManager.stop_processing('form_submit', success=False)
+                    st.error("❌ Form submission failed. Please try again.")
+                    
+            except Exception as e:
+                # Handle exceptions
+                ButtonManager.stop_processing('form_submit', success=False)
+                st.error(f"❌ Submission error: {str(e)}")
 
 # ============================================================================
 # PAGE IMPLEMENTATIONS
@@ -1291,8 +1464,10 @@ class PageManager:
         st.markdown("""
         <div class="info-card">
             <h4>📋 Required Information</h4>
-            <p>Please provide the basic information for your model comparison task.<br>
-            You can find the <strong>Question ID</strong> at the top right of the CrC task — look for the 🛈 icon and check the "Question ID(s)" section.</p>
+            <p>Please provide the following details for your model comparison task:<br></p>
+            - Locate the <strong>Question ID</strong> at the top right of your CrC task — look for the 🛈 icon and refer to the "Question ID(s)" section (<a href="https://www.loom.com/share/7085c6bfa96149f7b443dd1f04f6de51?sid=250e5b7b-7a5c-4e64-92ff-0657c65567a9" target="_blank">see video guide</a>).<br>
+            - Enter the alias email you use for work on the Google Crowd Compute (CrC) platform.<br>
+            - Paste the exact task prompt and image prompt (if any) used during the side-by-side LLM evaluation.</p>
         </div>
         """, unsafe_allow_html=True)
         
@@ -1307,7 +1482,7 @@ class PageManager:
                 
                 form_data['question_id'] = st.text_input(
                     "Question ID *",
-                    placeholder="e.g., bfdf67160ca3eca9b65f040e350b2f1f+bard_data+coach_P128628...",
+                    placeholder="e.g.,  bfdf67160ca3eca9b65f040e350b2f1f+bard_data+coach_P128628...",
                     help="Enter the unique identifier for this comparison",
                     value=st.session_state.get('question_id', ''),
                     disabled=st.session_state.get('form_data_locked', False)
@@ -1315,7 +1490,7 @@ class PageManager:
                 
                 form_data['user_email'] = st.text_input(
                     "Alias Email Address *",
-                    placeholder="i.e.  ops-chiron...@invisible.co", 
+                    placeholder="e.g.,   ops-chiron...@invisible.co", 
                     help="Enter your CrC alias email address",
                     value=st.session_state.get('user_email', ''),
                     disabled=st.session_state.get('form_data_locked', False)
@@ -1520,7 +1695,7 @@ class PageManager:
                 st.success(f"📂 **Project Type:** {qid_data['project_type']}")
         with col2:
             if qid_data.get('language'):
-                st.success(f"📍 **Language:** {qid_data['language']}")
+                st.success(f"🌐 **Language:** {qid_data['language']}")
     
     @staticmethod
     def render_image_upload():
@@ -1535,15 +1710,31 @@ class PageManager:
             st.error("⚠️ Prerequisites Missing: Please complete Step 1 (Metadata Input) first.")
             return
         
+        col1, col2 = st.columns(2)
+
         # Display current setup
-        st.markdown(f"""
+        with col1: st.markdown(f"""
         <div class="info-card">
             <h4>📋 Current Setup</h4>
             <p><strong>Comparison:</strong> {Utils.sanitize_html_output(st.session_state.model1)} vs {Utils.sanitize_html_output(st.session_state.model2)}</p>
             <p><strong>Question ID:</strong> {Utils.sanitize_html_output(st.session_state.question_id[:50])}...</p>
+            <p><strong>Language:</strong> {Utils.sanitize_html_output(st.session_state.sot_language)}</p>
+            <p><strong>Project Type:</strong> {Utils.sanitize_html_output(st.session_state.sot_project_type)}</p>
             <p><strong>Session ID:</strong> {Utils.sanitize_html_output(st.session_state.get('session_id', 'Unknown')[:8])}</p>
         </div>
         """, unsafe_allow_html=True)
+        
+        col2.markdown(f"""
+        <div class="info-card">
+            <h4>ℹ️ Guidelines</h4>
+            <p>– Include screenshots of <strong>both conversations</strong> (Gemini and its competitor).</p>
+            <p>– <strong>Do not crop the screenshots</strong> — the full <strong>horizontal</strong> interface must be visible, including the model name.</p>
+            <p>– Ensure <strong>all conversation turns</strong> are captured.</p>
+            <p>– Place the screenshots in the correct <strong>chronological order</strong>.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+
         
         col1, col2 = st.columns(2)
         
@@ -1866,7 +2057,7 @@ class PageManager:
     
     @staticmethod
     def render_upload_to_drive():
-        """Render upload to drive page - simplified without email validation."""
+        """Render upload to drive page with proper button state management."""
         st.header("4️⃣ Upload to Drive & Submit")
         
         if SecurityManager.is_workflow_completed():
@@ -1884,7 +2075,39 @@ class PageManager:
             st.error("⚠️ Email validation missing. Please return to Step 1 to validate your email.")
             return
         
-        PageManager._render_simplified_submission_form()
+        # Get PDF info
+        filename = Utils.generate_filename(st.session_state.model1, st.session_state.model2)
+        st.session_state.pdf_buffer.seek(0)
+        pdf_data = st.session_state.pdf_buffer.read()
+        file_size_kb = len(pdf_data) / 1024
+        
+        st.markdown("""
+        <div style="background: #16213e; color: white; padding: 2rem; border-radius: 15px; margin: 1rem 0;">
+            <h3 style="text-align: center; margin-bottom: 2rem;">📋 Final Submission</h3>
+        """, unsafe_allow_html=True)
+        
+        # Display pre-validated email
+        st.markdown("### ✅ Pre-validated Email")
+        st.success(f"📧 **Email:** {st.session_state.user_email}")
+        
+        # Form data display
+        PageManager._render_form_data_display(filename, file_size_kb)
+        
+        # Drive upload section
+        PageManager._render_drive_upload_section(filename)
+        
+        # Handle drive upload processing if in progress
+        if ButtonManager.is_button_processing('drive_upload'):
+            handle_drive_upload_processing(filename)
+        
+        # Final submission section
+        PageManager._render_final_submission_section(filename, file_size_kb)
+        
+        # Handle form submission processing if in progress
+        if ButtonManager.is_button_processing('form_submit'):
+            handle_form_submission_processing(filename, file_size_kb)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
     
     @staticmethod
     def _render_simplified_submission_form():
@@ -1902,7 +2125,7 @@ class PageManager:
         
         # Display pre-validated email
         st.markdown("### ✅ Pre-validated Email")
-        st.success(f"📧 **Email:** {st.session_state.user_email} (Validated in Step 1)")
+        st.success(f"📧 **Email:** {st.session_state.user_email} ")
         
         # Form data display
         PageManager._render_form_data_display(filename, file_size_kb)
@@ -1965,84 +2188,109 @@ class PageManager:
                 st.markdown(f"**{label}:**")
             with col2:
                 st.markdown(f"`{value}`")
-    
+
     @staticmethod
     def _render_drive_upload_section(filename: str):
-        """Render drive upload section."""
+        """Render drive upload section with immediate button locking."""
         st.markdown("### 🔗 Google Drive Upload")
         
         col1, col2 = st.columns([3, 1])
         
         with col1:
-            if st.session_state.get('drive_url'):
-                st.text_input("Drive URL", value=st.session_state.drive_url, disabled=True)
+            # Show current drive URL status
+            current_drive_url = st.session_state.get('drive_url', '')
+            
+            if current_drive_url:
+                st.text_input("Drive URL", value=current_drive_url, disabled=True)
+                st.markdown(f"🔗 **[Open in Google Drive]({current_drive_url})**")
             else:
-                st.text_input("Drive URL", value="Will be generated after clicking 'Upload'...", disabled=True)
+                button_state = ButtonManager.get_button_state('drive_upload')
+                if button_state == "processing":
+                    st.text_input("Drive URL", value="⚙️ Upload in progress...", disabled=True)
+                else:
+                    st.text_input("Drive URL", value="Will be generated after upload", disabled=True)
         
         with col2:
-            upload_disabled = (not st.session_state.get('email_validated', False) or
-                             st.session_state.get('drive_upload_locked', False))
+            # Get current button state
+            button_state = ButtonManager.get_button_state('drive_upload')
             
-            if not st.session_state.get('drive_url_generated', False):
-                if st.button("📤 Upload", disabled=upload_disabled):
-                    with st.spinner("Uploading to Google Drive..."):
-                        drive_url = FormProcessor.process_drive_upload(
-                            st.session_state.user_email, filename
-                        )
-                        if drive_url:
-                            st.success("✅ Upload successful!")
-                            st.rerun()
-                        else:
-                            st.error("❌ Upload failed")
-            else:
+            # Determine if upload is allowed
+            can_upload = SecurityManager.can_upload_to_drive()
+            
+            # Show appropriate UI based on state
+            if button_state == "locked" and st.session_state.get('drive_url'):
                 st.success("✅ Uploaded")
+            elif button_state == "processing":
+                st.warning("⚙️ Uploading...")
+                st.info("🔒 Please wait")
+                # Show a disabled button to maintain UI consistency
+                st.button("📤 Uploading...", disabled=True, key="drive_upload_disabled")
+            else:
+                # Show the actual upload button
+                upload_clicked = st.button(
+                    "📤 Upload", 
+                    disabled=not can_upload,
+                    key="drive_upload_btn",
+                    type="primary"
+                )
+                
+                # Handle button click with immediate state change
+                if upload_clicked and can_upload:
+                    # IMMEDIATELY start processing to prevent multiple clicks
+                    if ButtonManager.start_processing('drive_upload'):
+                        # Force immediate rerun to show processing state
+                        st.rerun()
+
     
     @staticmethod
     def _render_final_submission_section(filename: str, file_size_kb: float):
-        """Render final submission section with some security."""
+        """Render final submission section with immediate button locking."""
         st.markdown("### 📤 Final Submission")
         
-        # Check if submission is possible
-        can_submit = (st.session_state.get('email_validated', False) and 
-                     st.session_state.get('drive_url_generated', False))
+        # Get current button state
+        button_state = ButtonManager.get_button_state('form_submit')
         
-        # Check current submission state
-        submitting = st.session_state.get('submitting_in_progress', False)
-        submitted = st.session_state.get('form_submitted', False)
+        # Check if form submission is allowed
+        can_submit = SecurityManager.can_submit_form()
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if submitted:
+            if button_state == "locked":
                 st.success("✅ Form Already Submitted")
-            elif submitting:
-                st.warning("⚙️ Submission in progress...")
-                st.info("🔒 Please wait, do not refresh or navigate away")
+            elif button_state == "processing":
+                st.warning("⚙️ Submitting...")
+                st.info("🔒 Please wait, do not refresh")
+                # Show disabled button to maintain UI consistency
+                st.button("📋 Submitting...", disabled=True, key="form_submit_disabled")
             else:
-                # Show submit button
-                submit_disabled = not can_submit
+                # Show the actual submit button
+                submit_clicked = st.button(
+                    "📋 Submit Form", 
+                    type="primary", 
+                    use_container_width=True, 
+                    disabled=not can_submit,
+                    key="form_submit_btn"
+                )
                 
-                if st.button("📋 Submit Form", type="primary", use_container_width=True, disabled=submit_disabled):
-                    with st.spinner("Submitting form... Please wait..."):
-                        success = FormProcessor.process_form_submission(
-                            st.session_state.user_email, filename, file_size_kb
-                        )
-                        if success:
-                            st.success("🎉 Form submitted successfully!")
-                            st.balloons()
-                            time.sleep(2)
-                            st.rerun()
-                        # If failed, FormProcessor already shows error and unlocks
-                
-        # Show submission requirements
-        if not submitted and not submitting and not can_submit:
-            requirements = []
-            if not st.session_state.get('email_validated', False):
-                requirements.append("❌ Email validation required")
-            if not st.session_state.get('drive_url_generated', False):
-                requirements.append("❌ Drive upload required")
+                # Handle button click with immediate state change
+                if submit_clicked and can_submit:
+                    # IMMEDIATELY start processing to prevent multiple clicks
+                    if ButtonManager.start_processing('form_submit'):
+                        # Force immediate rerun to show processing state
+                        st.rerun()
             
-            if requirements:
-                st.warning("**Requirements:** " + " | ".join(requirements))
+            # Show submission requirements
+            if button_state == "ready" and not can_submit:
+                requirements = []
+                if not st.session_state.get('email_validated', False):
+                    requirements.append("❌ Email validation required")
+                if not st.session_state.get('drive_url_generated', False):
+                    requirements.append("❌ Drive upload required")
+                if not st.session_state.get('drive_url', ''):
+                    requirements.append("❌ Drive URL missing")
+                
+                if requirements:
+                    st.warning("**Requirements:** " + " | ".join(requirements))
     
     @staticmethod
     def render_help():
