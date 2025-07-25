@@ -1583,38 +1583,57 @@ class PageManager:
             disabled=upload_locked
         )
         
-        if uploaded_images and not upload_locked:
-            valid_files = [img for img in uploaded_images if Utils.validate_file_size(img)]
+        # Check if we have temp images stored (persists across reruns)
+        temp_images_key = f"{model_key}_images_temp"
+        existing_temp_images = st.session_state.get(temp_images_key, [])
+        
+        # Use uploaded images if available, otherwise use existing temp images
+        images_to_process = uploaded_images if uploaded_images else existing_temp_images
+        
+        if images_to_process and not upload_locked:
+            # Only validate file sizes if these are newly uploaded images
+            if uploaded_images:
+                valid_files = [img for img in uploaded_images if Utils.validate_file_size(img)]
+                
+                if len(valid_files) != len(uploaded_images):
+                    st.error(f"Some files too large (max {AppConfig.MAX_FILE_SIZE_MB}MB each)")
+                
+                if valid_files:
+                    # Store valid files as temp images
+                    st.session_state[temp_images_key] = valid_files
+                    images_to_process = valid_files
+                else:
+                    images_to_process = []
             
-            if len(valid_files) != len(uploaded_images):
-                st.error(f"Some files too large (max {AppConfig.MAX_FILE_SIZE_MB}MB each)")
-            
-            if valid_files:
-                st.success(f"📁 {len(valid_files)} valid image(s) uploaded for {model_name}")
+            if images_to_process:
+                st.success(f"📁 {len(images_to_process)} valid image(s) uploaded for {model_name}")
                 
                 with st.expander("🔍 Preview & Reorder Images", expanded=True):
-                    reordered_images = PageManager._create_reorderable_preview(valid_files, model_name, model_key)
-                    # Store reordered images in session state
-                    st.session_state[f"{model_key}_images_temp"] = reordered_images
+                    reordered_images = PageManager._create_reorderable_preview(images_to_process, model_name, model_key)
+                    # Update temp images with reordered version
+                    st.session_state[temp_images_key] = reordered_images
     
     @staticmethod
     def _create_reorderable_preview(images: List[BinaryIO], model_name: str, model_key: str) -> List[BinaryIO]:
-        """Create reorderable image preview."""
+        """Create reorderable image preview with persistent state."""
         if SecurityManager.is_workflow_completed():
             st.info("🔒 **Workflow completed** - Image reordering is locked.")
             for i, img in enumerate(images):
                 st.image(img, caption=f"Position {i+1}: {model_name}", use_container_width=True)
             return images
         
-        # Initialize reordered list
+        # Initialize reordered list with proper state management
         reorder_key = f"{model_key}_reordered"
-        if reorder_key not in st.session_state:
+        
+        # Only initialize if we don't have existing reordered state or if images changed
+        if reorder_key not in st.session_state or len(st.session_state[reorder_key]) != len(images):
             st.session_state[reorder_key] = list(images)
         
         current_images = st.session_state[reorder_key]
         
-        # Check if order changed
-        if current_images != list(images):
+        # Check if order was modified from original
+        original_order_different = current_images != list(images)
+        if original_order_different and len(current_images) == len(images):
             st.success("✅ **Order modified** - Remember to click 'Save Images' to confirm changes")
         
         # Display images with controls
@@ -1622,23 +1641,33 @@ class PageManager:
             col_img, col_controls = st.columns([5, 1])
             
             with col_img:
-                st.image(img, caption=f"Position {i+1}: {model_name}", use_container_width=True)
+                try:
+                    st.image(img, caption=f"Position {i+1}: {model_name}", use_container_width=True)
+                except Exception as e:
+                    st.error(f"Error displaying image {i+1}: {str(e)}")
             
             with col_controls:
                 st.markdown(f"**#{i+1}**")
                 
+                # Move up button
                 if i > 0:
-                    if st.button("⬆️", help="Move up", key=f"{model_key}_up_{i}"):
+                    move_up_key = f"{model_key}_up_{i}_{len(current_images)}"  # Add length to make key unique
+                    if st.button("⬆️", help="Move up", key=move_up_key):
+                        # Swap images
                         current_images[i], current_images[i-1] = current_images[i-1], current_images[i]
                         st.session_state[reorder_key] = current_images
                         st.rerun()
                 
+                # Move down button
                 if i < len(current_images) - 1:
-                    if st.button("⬇️", help="Move down", key=f"{model_key}_down_{i}"):
+                    move_down_key = f"{model_key}_down_{i}_{len(current_images)}"  # Add length to make key unique
+                    if st.button("⬇️", help="Move down", key=move_down_key):
+                        # Swap images
                         current_images[i], current_images[i+1] = current_images[i+1], current_images[i]
                         st.session_state[reorder_key] = current_images
                         st.rerun()
             
+            # Add separator between images (except for the last one)
             if i < len(current_images) - 1:
                 st.markdown('<hr style="margin: 0.25rem 0; border: 0.5px solid #f0f0f0;">', unsafe_allow_html=True)
         
@@ -2090,8 +2119,14 @@ class PageManager:
         - **"Already submitted" error**: Session is locked after completion - start new session
         - **Submit button disabled**: Complete Drive upload first
         
+        #### Security-Related Issues:
+        - **"Submission in progress"**: Wait for current submission to complete
+        - **Multiple clicks not working**: System prevents duplicate submissions
+        - **Session locked**: Start new session for additional comparisons
+        
         #### Best Practices:
         - Use high-resolution screenshots (1920x1080 recommended)
+        - Compress large images before upload using online tools
         - Ensure images are in supported formats (PNG, JPG, JPEG)
         - Complete all validations in Step 1 before proceeding
         - **Do not refresh page during uploads** - may cause session issues
@@ -2121,6 +2156,20 @@ class PageManager:
         ```
         a5009505a2b411ff7b174326bb33306a+bard_data+coach_P128631_quality_sxs_e2e_experience_learning_and_academic_help_frozen_pool_human_eval_en-US-50+INTERNAL+en:18019373568084263285
         ```
+        **Extracted Task ID:**
+        ```
+        coach_P128631_quality_sxs_e2e_experience_learning_and_academic_help_frozen_pool_human_eval_en-US-50
+        ```
+        **Auto-populated from SOT:**
+        - Language: `en-US`
+        - Model Comparison: `Bard 2.5 Pro vs. AIS 2.5 Pro`
+        - Project Type: `Learning & Academic Help`
+        
+        #### Brand Recognition Examples:
+        - **"Bard 2.5 Pro"** → Google Blue + "Gemini" brand
+        - **"AIS 2.5 PRO"** → Google Blue + "Google AI Studio" brand  
+        - **"cGPT o3"** → OpenAI Green + "OpenAI" brand
+        - **"Claude"** → Anthropic Orange + "Anthropic" brand
         
         #### Sample Email Formats:
         ```
