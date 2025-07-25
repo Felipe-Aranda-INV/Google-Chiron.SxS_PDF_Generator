@@ -1,4 +1,3 @@
-
 import io
 import os
 import re
@@ -134,6 +133,7 @@ class SecurityManager:
         security_defaults = {
             # Core workflow locks
             'submission_locked': False,
+            'submitting_in_progress': False,
             'drive_upload_locked': False,
             'form_submitted': False,
             'workflow_completed': False,
@@ -179,15 +179,39 @@ class SecurityManager:
         return st.session_state.get('workflow_completed', False)
     
     @staticmethod
-    def lock_workflow() -> None:
-        """Lock the entire workflow after successful completion."""
+    def start_submission() -> bool:
+        """Start submission process with immediate locking. Returns True if allowed."""
+        if st.session_state.get('submitting_in_progress', False):
+            return False
+        if st.session_state.get('submission_locked', False):
+            return False
+        if st.session_state.get('form_submitted', False):
+            return False
+            
+        st.session_state.submitting_in_progress = True
+        return True
+    
+    @staticmethod
+    def complete_submission_success() -> None:
+        """Mark submission as completed successfully."""
         st.session_state.submission_locked = True
-        st.session_state.drive_upload_locked = True
+        st.session_state.submitting_in_progress = False
         st.session_state.form_submitted = True
         st.session_state.workflow_completed = True
         st.session_state.navigation_locked = True
         st.session_state.form_data_locked = True
         st.session_state.workflow_completion_timestamp = datetime.now().isoformat()
+    
+    @staticmethod
+    def fail_submission() -> None:
+        """Mark submission as failed and unlock for retry."""
+        st.session_state.submitting_in_progress = False
+        # Keep other locks as they were
+    
+    @staticmethod
+    def lock_workflow() -> None:
+        """Lock the entire workflow after successful completion."""
+        SecurityManager.complete_submission_success()
     
     @staticmethod
     def is_navigation_allowed(target_page: str) -> bool:
@@ -227,8 +251,6 @@ class AppsScriptClient:
     
     def __init__(self):
         self.webhook_url = AppConfig.WEBHOOK_URL
-        self.is_connected = False
-        self.last_test = None
     
     def _make_request(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Make a secure request to the webhook."""
@@ -252,13 +274,6 @@ class AppsScriptClient:
                 
         except Exception as e:
             return {"success": False, "message": f"Request error: {str(e)}"}
-    
-    def test_connection(self) -> Dict[str, Any]:
-        """Test connection to Google Apps Script webhook."""
-        result = self._make_request({"action": "test_connection"})
-        self.is_connected = result.get("success", False)
-        self.last_test = datetime.now()
-        return result
     
     def validate_email(self, email: str, attempt_count: int = 1) -> Dict[str, Any]:
         """Validate email against authorized list."""
@@ -316,11 +331,6 @@ class AppsScriptClient:
             "action": "log_submission",
             **form_data
         })
-        
-        if result.get("success"):
-            st.session_state.submission_locked = True
-            st.session_state.form_submitted = True
-            st.session_state.form_submission_timestamp = datetime.now().isoformat()
         
         return result
 
@@ -1216,9 +1226,10 @@ class FormProcessor:
     
     @staticmethod
     def process_form_submission(user_email: str, filename: str, file_size_kb: float) -> bool:
-        """Process final form submission."""
-        if st.session_state.get('submission_locked', False):
-            st.error("🔒 Form already submitted for this session")
+        """Process final form submission with proper locking."""
+        # Check if submission can start (immediate locking)
+        if not SecurityManager.start_submission():
+            st.error("🔒 Submission already in progress or completed")
             return False
         
         try:
@@ -1241,26 +1252,29 @@ class FormProcessor:
                 'session_id': st.session_state.get('session_id', 'unknown')
             }
             
-            success = apps_script.log_submission(form_data).get("success", False)
+            result = apps_script.log_submission(form_data)
+            success = result.get("success", False)
             
             if success:
-                SecurityManager.lock_workflow()
+                SecurityManager.complete_submission_success()
                 EmailValidator.reset_attempts(user_email)
                 return True
             else:
-                st.error("❌ Submission failed. Please try again.")
+                SecurityManager.fail_submission()
+                st.error(f"❌ Submission failed: {result.get('message', 'Unknown error')}")
                 return False
                 
         except Exception as e:
+            SecurityManager.fail_submission()
             st.error(f"Submission error: {str(e)}")
             return False
 
 # ============================================================================
-# PAGE IMPLEMENTATIONS - UPDATED WITH STEP 1 REFACTOR
+# PAGE IMPLEMENTATIONS
 # ============================================================================
 
 class PageManager:
-    """Manage individual page implementations with Step 1 refactor."""
+    """Manage individual page implementations."""
     
     @staticmethod
     def render_metadata_input():
@@ -1953,18 +1967,30 @@ class PageManager:
     
     @staticmethod
     def _render_final_submission_section(filename: str, file_size_kb: float):
-        """Render final submission section."""
+        """Render final submission section with some security."""
         st.markdown("### 📤 Final Submission")
         
-        submit_disabled = (not (st.session_state.get('email_validated', False) and 
-                               st.session_state.get('drive_url_generated', False)) or
-                          st.session_state.get('form_submitted', False))
+        # Check if submission is possible
+        can_submit = (st.session_state.get('email_validated', False) and 
+                     st.session_state.get('drive_url_generated', False))
+        
+        # Check current submission state
+        submitting = st.session_state.get('submitting_in_progress', False)
+        submitted = st.session_state.get('form_submitted', False)
         
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            if not st.session_state.get('form_submitted', False):
+            if submitted:
+                st.success("✅ Form Already Submitted")
+            elif submitting:
+                st.warning("⚙️ Submission in progress...")
+                st.info("🔒 Please wait, do not refresh or navigate away")
+            else:
+                # Show submit button
+                submit_disabled = not can_submit
+                
                 if st.button("📋 Submit Form", type="primary", use_container_width=True, disabled=submit_disabled):
-                    with st.spinner("Submitting form..."):
+                    with st.spinner("Submitting form... Please wait..."):
                         success = FormProcessor.process_form_submission(
                             st.session_state.user_email, filename, file_size_kb
                         )
@@ -1973,11 +1999,10 @@ class PageManager:
                             st.balloons()
                             time.sleep(2)
                             st.rerun()
-            else:
-                st.success("✅ Form Already Submitted")
+                        # If failed, FormProcessor already shows error and unlocks
                 
         # Show submission requirements
-        if submit_disabled and not st.session_state.get('form_submitted', False):
+        if not submitted and not submitting and not can_submit:
             requirements = []
             if not st.session_state.get('email_validated', False):
                 requirements.append("❌ Email validation required")
@@ -1995,7 +2020,7 @@ class PageManager:
         if SecurityManager.is_workflow_completed():
             st.success("🔒 **Workflow Completed** - Your comparison has been successfully submitted.")
         
-        tab1, tab2, tab3, tab4 = st.tabs(["📋 Instructions", "🔧 Troubleshooting", "📊 Examples", "🔒 Security"])
+        tab1, tab2, tab3 = st.tabs(["📋 Instructions", "🔧 Troubleshooting", "📊 Examples"])
         
         with tab1:
             PageManager._render_help_instructions()
@@ -2005,9 +2030,6 @@ class PageManager:
         
         with tab3:
             PageManager._render_help_examples()
-        
-        with tab4:
-            PageManager._render_help_security()
     
     @staticmethod
     def _render_help_instructions():
@@ -2074,12 +2096,12 @@ class PageManager:
         - **Upload fails**: Ensure stable internet connection
         - **Form submission disabled**: Complete all required steps first
         - **"Already submitted" error**: Session is locked after completion - start new session
+        - **Submit button disabled**: Complete Drive upload first
         
-        #### Step 1 Specific Issues:
-        - **SOT connection fails**: Check system status in sidebar
-        - **Brand colors not showing**: Clear browser cache and refresh
-        - **Model combination not auto-populated**: Question ID may not exist in SOT
-        - **Email attempts exceeded**: Contact support for assistance
+        #### Security-Related Issues:
+        - **"Submission in progress"**: Wait for current submission to complete
+        - **Multiple clicks not working**: System prevents duplicate submissions
+        - **Session locked**: Start new session for additional comparisons
         
         #### Best Practices:
         - Use high-resolution screenshots (1920x1080 recommended)
@@ -2088,6 +2110,7 @@ class PageManager:
         - Complete all validations in Step 1 before proceeding
         - **Do not refresh page during uploads** - may cause session issues
         - **Complete workflow in one session** - avoid leaving partially completed
+        - **Click Submit only once** - system will show progress indicator
         """)
     
     @staticmethod
@@ -2131,53 +2154,6 @@ class PageManager:
         """)
     
     @staticmethod
-    def _render_help_security():
-        """Render security help."""
-        st.markdown("""
-        ### 🔒 Security & Anti-Exploitation Features
-        
-        #### Workflow Protection:
-        - **Single PDF Generation**: Prevents resource abuse
-        - **One Drive Upload Per Session**: Eliminates duplicate files
-        - **Single Form Submission**: Prevents duplicate spreadsheet entries
-        - **Session Locking**: Completed workflows cannot be modified
-        - **Navigation Restrictions**: Locked sessions have limited page access
-        
-        #### Enhanced Step 1 Security:
-        - **Integrated Validation**: Both Question ID and email validated together
-        - **SOT-Based Model Recognition**: Prevents invalid model combinations
-        - **Brand Awareness**: Automatic styling prevents spoofing
-        - **Early Email Validation**: Prevents incomplete workflows
-        
-        #### Session Management:
-        - **Unique Session IDs**: Every session gets cryptographic identifier
-        - **Timestamp Tracking**: All actions are logged with precise timestamps
-        - **State Validation**: Comprehensive checks prevent invalid state transitions
-        - **Memory Protection**: Secure cleanup of temporary files and data
-        
-        #### Anti-Exploitation Measures:
-        - **CSRF Protection**: Cross-site request forgery prevention
-        - **Input Sanitization**: All user inputs are safely processed
-        - **File Type Validation**: Only approved image formats accepted
-        - **Size Limits**: Prevents resource exhaustion attacks
-        - **Rate Limiting**: Email validation attempts are tracked and limited
-        
-        #### Data Security:
-        - **No Persistent Storage**: All data cleared between sessions
-        - **Secure Transmission**: HTTPS encryption for all communications
-        - **Access Control**: Email-based authorization required
-        - **Audit Trail**: Complete logging of all user actions
-        - **Brand Recognition Caching**: Secure color coding system
-        
-        #### Best Security Practices:
-        - **Complete workflow in one session** - avoid partial completion
-        - **Don't share session URLs** - each session is user-specific
-        - **Use authorized email addresses** - validation is strictly enforced
-        - **Verify SOT data accuracy** - ensures correct model recognition
-        - **Start new session for new comparisons** - don't reuse completed sessions
-        """)
-    
-    @staticmethod
     def _show_next_step_button(current_page: str):
         """Show next step button if current step is completed."""
         if SecurityManager.is_workflow_completed():
@@ -2206,7 +2182,7 @@ class PageManager:
                 st.rerun()
 
 # ============================================================================
-# SIDEBAR COMPONENTS
+# SIDEBAR COMPONENTS (SIMPLIFIED)
 # ============================================================================
 
 class SidebarManager:
@@ -2274,47 +2250,6 @@ class SidebarManager:
             st.sidebar.error("🔒 Navigation to this page is restricted")
     
     @staticmethod
-    def render_system_status():
-        """Render system status section."""
-        st.sidebar.markdown("### 🔗 System Status")
-        
-        if SecurityManager.is_workflow_completed():
-            st.sidebar.success("🔒 **WORKFLOW COMPLETED**")
-        
-        if st.sidebar.button("🔄 Test Connection"):
-            with st.sidebar:
-                with st.spinner("Testing..."):
-                    apps_script = get_apps_script_client()
-                    result = apps_script.test_connection()
-            
-            if result.get("success"):
-                st.sidebar.success("🟢 System Ready")
-                
-                data = result.get("data", {})
-                tabs_found = data.get("tabs_found", [])
-                
-                if "Alias Emails" in tabs_found:
-                    st.sidebar.text("✅ Email validation: Ready")
-                else:
-                    st.sidebar.error("❌ Email validation: Unavailable")
-                
-                if "🏠 SOT" in tabs_found:
-                    st.sidebar.text("✅ SOT lookup: Ready")
-                else:
-                    st.sidebar.error("❌ SOT lookup: Unavailable")
-                
-                st.sidebar.text(f"📊 Tabs: {len(tabs_found)} found")
-            else:
-                st.sidebar.error("🔴 System Offline")
-                st.sidebar.error(f"❌ {result.get('message', 'Connection failed')}")
-        
-        # Show configuration status
-        if AppConfig.WEBHOOK_URL:
-            st.sidebar.text("🔗 Webhook: Configured")
-        else:
-            st.sidebar.error("🔗 Webhook: Not configured")
-    
-    @staticmethod
     def render_session_info():
         """Render current session information."""
         if 'question_id' in st.session_state:
@@ -2354,30 +2289,6 @@ class SidebarManager:
             
             if 'model2_images' in st.session_state:
                 st.sidebar.metric("Model 2 Images", len(st.session_state.model2_images))
-    
-    @staticmethod
-    def render_security_status():
-        """Render security status information."""
-        st.sidebar.markdown("### 🔒 Session Security")
-        
-        session_id = st.session_state.get('session_id', 'Unknown')[:8]
-        st.sidebar.text(f"Session ID: {session_id}")
-        
-        # Security status indicators
-        security_items = [
-            ("Question ID", st.session_state.get('question_id_validated', False)),
-            ("Email", st.session_state.get('email_validated', False)),
-            ("Drive Upload", st.session_state.get('drive_upload_locked', False)),
-            ("Form Submit", st.session_state.get('submission_locked', False)),
-            ("Workflow", st.session_state.get('workflow_completed', False)),
-        ]
-        
-        for item_name, is_validated_or_locked in security_items:
-            if item_name in ["Question ID", "Email"]:
-                status = "✅ Valid" if is_validated_or_locked else "❌ Pending"
-            else:
-                status = "🔒 Locked" if is_validated_or_locked else "🔓 Available"
-            st.sidebar.text(f"{item_name}: {status}")
 
 # ============================================================================
 # MAIN APPLICATION CONTROLLER
@@ -2405,7 +2316,7 @@ def main():
     <div class="main-header">
         <h1>🖨️ SxS Model Comparison PDF Generator</h1>
         <p>Generate standardized PDF documents for side-by-side LLM comparisons</p>
-        <small style="opacity: 0.8;">v2.1.0 - SOT-Based Model Recognition & Email Integration</small>
+        <small style="opacity: 0.8;">v2.1.0 - Production Edition with Enhanced Security</small>
     </div>
     """, unsafe_allow_html=True)
     
@@ -2416,12 +2327,10 @@ def main():
         if st.session_state.current_page not in allowed_pages:
             st.session_state.current_page = "Upload to Drive"
     
-    # Render sidebar components
+    # Render sidebar components (simplified)
     SidebarManager.render_navigation()
-    SidebarManager.render_system_status()
     SidebarManager.render_session_info()
     SidebarManager.render_session_stats()
-    SidebarManager.render_security_status()
     
     # Display step indicator
     UIComponents.display_step_indicator(st.session_state.current_page)
