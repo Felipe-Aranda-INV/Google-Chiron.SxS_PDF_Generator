@@ -1,27 +1,4 @@
-"""
-SxS PDF Generator - Production-Ready Streamlit Application
-==========================================================
 
-A secure, enterprise-grade application for generating standardized PDF documents
-for side-by-side LLM model comparisons with Google Sheets integration.
-
-Version: 2.0.0 - Production Edition
-Author: Optimized for Production Use
-Last Updated: July 2025
-
-Key Features:
-- Anti-exploitation security with session locking
-- Professional PDF generation with Google Slides format
-- Comprehensive error handling and user feedback
-- Optimized performance with proper caching strategies
-- Modular architecture for maintainability
-"""
-
-# ============================================================================
-# IMPORTS & DEPENDENCIES
-# ============================================================================
-
-# Standard Library
 import io
 import os
 import re
@@ -33,7 +10,6 @@ import traceback
 from datetime import datetime
 from typing import List, Optional, BinaryIO, Tuple, Dict, Any, Union
 
-# Third-party Libraries
 import streamlit as st
 import requests
 from PIL import Image, ImageDraw
@@ -59,7 +35,8 @@ PAGE_CONFIG = {
 # Application Constants
 class AppConfig:
     # Google Apps Script Integration
-    WEBHOOK_URL = st.secrets.get("webhook_url", "")
+    WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbysvr-E6UPHEb75UTXoChwlH2ZFr1ikPrl7F7EqJ6BCzlCjo5q79P6ITGagM7jHstsj/exec"
+    # st.secrets.get("webhook_url", "")
     WEBHOOK_TIMEOUT = 30
     
     # File Handling
@@ -76,26 +53,73 @@ class AppConfig:
     MAX_SESSION_DURATION = 3600  # 1 hour in seconds
     MAX_EMAIL_ATTEMPTS = 10
 
-# Model Configurations
-MODEL_CONFIGS = {
-    "Gemini": {"color": "#4285f4", "logo_text": "Gemini", "brand_names": ["Gemini", "Bard", "Google AI Studio", "AIS"]},
-    "ChatGPT": {"color": "#10a37f", "logo_text": "ChatGPT", "brand_names": ["ChatGPT", "OpenAI", "GPT"]},
-    "AIS 2.5 PRO": {"color": "#4285f4", "logo_text": "AIS 2.5 PRO", "brand_names": ["AIS", "Google AI Studio", "Gemini"]},
-    "Bard 2.5 Pro": {"color": "#4285f4", "logo_text": "Bard 2.5 Pro", "brand_names": ["Bard", "Google AI Studio", "Gemini"]},
-    "Bard 2.5 Flash": {"color": "#4285f4", "logo_text": "Bard 2.5 Flash", "brand_names": ["Bard", "Google AI Studio", "Gemini"]},
-    "cGPT o3": {"color": "#10a37f", "logo_text": "cGPT o3", "brand_names": ["ChatGPT", "OpenAI", "GPT"]},
-    "cGPT 4o": {"color": "#10a37f", "logo_text": "cGPT 4o", "brand_names": ["ChatGPT", "OpenAI", "GPT"]},
-    "AIS 2.5 Flash": {"color": "#4285f4", "logo_text": "AIS 2.5 Flash", "brand_names": ["AIS", "Google AI Studio", "Gemini"]},
-}
 
-# Available Model Combinations
-MODEL_COMBINATIONS = [
-    ("Bard 2.5 Pro", "AIS 2.5 PRO"),
-    ("AIS 2.5 PRO", "cGPT o3"),
-    ("AIS 2.5 Flash", "cGPT 4o"),
-    ("Bard 2.5 Pro", "cGPT o3"),
-    ("Bard 2.5 Flash", "cGPT 4o"),
-]
+class ModelBrandManager:
+    """Manages brand recognition and color coding for model names."""
+    
+    # Brand recognition mapping - static reference for color coding
+    BRAND_COLOR_MAP = {
+        # Google/Gemini family
+        "bard": {"color": "#4285f4", "brand": "Gemini"},
+        "gemini": {"color": "#4285f4", "brand": "Gemini"}, 
+        "ais": {"color": "#4285f4", "brand": "Google AI Studio"},
+        "google": {"color": "#4285f4", "brand": "Google AI Studio"},
+        
+        # OpenAI family
+        "chatgpt": {"color": "#10a37f", "brand": "OpenAI"},
+        "cgpt": {"color": "#10a37f", "brand": "OpenAI"},
+        "gpt": {"color": "#10a37f", "brand": "OpenAI"},
+        "openai": {"color": "#10a37f", "brand": "OpenAI"},
+        
+        # Anthropic family
+        "claude": {"color": "#d97706", "brand": "Anthropic"},
+        "anthropic": {"color": "#d97706", "brand": "Anthropic"},
+        
+        # Meta family  
+        "llama": {"color": "#1877f2", "brand": "Meta"},
+        "meta": {"color": "#1877f2", "brand": "Meta"},
+        
+        # Default fallback
+        "default": {"color": "#6b7280", "brand": "Unknown"}
+    }
+    
+    @staticmethod
+    @st.cache_data
+    def get_model_config(model_name: str) -> Dict[str, str]:
+        """Get color and brand info for a model name."""
+        if not model_name:
+            return {
+                "color": ModelBrandManager.BRAND_COLOR_MAP["default"]["color"],
+                "brand": ModelBrandManager.BRAND_COLOR_MAP["default"]["brand"],
+                "logo_text": "Unknown"
+            }
+        
+        model_lower = model_name.lower()
+        
+        # Check each brand keyword
+        for brand_key, config in ModelBrandManager.BRAND_COLOR_MAP.items():
+            if brand_key != "default" and brand_key in model_lower:
+                return {
+                    "color": config["color"],
+                    "brand": config["brand"],
+                    "logo_text": model_name
+                }
+        
+        # Default fallback
+        return {
+            "color": ModelBrandManager.BRAND_COLOR_MAP["default"]["color"],
+            "brand": ModelBrandManager.BRAND_COLOR_MAP["default"]["brand"], 
+            "logo_text": model_name
+        }
+    
+    @staticmethod
+    @st.cache_data
+    def get_brand_gradient(model1_name: str, model2_name: str) -> str:
+        """Get CSS gradient for two model brands."""
+        model1_config = ModelBrandManager.get_model_config(model1_name)
+        model2_config = ModelBrandManager.get_model_config(model2_name)
+        
+        return f"linear-gradient(90deg, {model1_config['color']}22, {model2_config['color']}22)"
 
 # ============================================================================
 # SECURITY & SESSION MANAGEMENT
@@ -365,11 +389,15 @@ class Utils:
     
     @staticmethod
     def generate_filename(model1: str, model2: str) -> str:
-        """Generate standardized filename for PDF."""
+        """Generate standardized filename for PDF with brand awareness."""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Clean model names for filename
         model1_clean = re.sub(r'[^\w\-_.]', '_', model1)
         model2_clean = re.sub(r'[^\w\-_.]', '_', model2)
+        
         session_id = st.session_state.get('session_id', 'unknown')[:8]
+        
         return f"SxS_Comparison_{model1_clean}_vs_{model2_clean}_{timestamp}_{session_id}.pdf"
     
     @staticmethod
@@ -412,21 +440,21 @@ class Utils:
         return language, project_type
     
     @staticmethod
+    @st.cache_data
     def parse_model_combination(model_comparison: str) -> Tuple[Optional[str], Optional[str]]:
-        """Parse model combination string into individual models."""
+        """Parse model combination string into individual models with better matching."""
         try:
             if not model_comparison:
                 return None, None
             
-            if " vs " in model_comparison:
-                parts = model_comparison.split(" vs ")
-            elif " vs. " in model_comparison:
-                parts = model_comparison.split(" vs. ")
-            else:
-                return None, None
+            # Try multiple separator patterns
+            separators = [" vs. ", " vs ", " v. ", " v ", " VS. ", " VS "]
             
-            if len(parts) == 2:
-                return parts[0].strip(), parts[1].strip()
+            for separator in separators:
+                if separator in model_comparison:
+                    parts = model_comparison.split(separator, 1)  # Split only on first occurrence
+                    if len(parts) == 2:
+                        return parts[0].strip(), parts[1].strip()
             
             return None, None
         except Exception:
@@ -437,7 +465,7 @@ class Utils:
 # ============================================================================
 
 class PDFGenerator:
-    """Production-grade PDF generator with Google Slides format."""
+    """Production-grade PDF generator with Google Slides format and brand awareness."""
     
     def __init__(self):
         self.page_width = AppConfig.PDF_PAGE_WIDTH
@@ -766,8 +794,12 @@ class PDFGenerator:
             st.error(f"Error drawing prompt image: {str(e)}")
     
     def create_model_title_slide(self, canvas_obj, model_name: str):
-        """Create model title slide."""
+        """Create model title slide with brand-aware styling."""
         self.draw_slide_background(canvas_obj)
+        
+        # Get brand configuration
+        model_config = ModelBrandManager.get_model_config(model_name)
+        brand_color = HexColor(model_config['color'])
         
         self.draw_centered_text(
             canvas_obj, 
@@ -775,7 +807,17 @@ class PDFGenerator:
             self.page_height / 2, 
             font_name="Helvetica-Bold", 
             font_size=56,
-            color=self.primary_color
+            color=brand_color
+        )
+        
+        # Add brand subtitle
+        self.draw_centered_text(
+            canvas_obj,
+            model_config['brand'],
+            self.page_height / 2 - 80,
+            font_name="Helvetica",
+            font_size=24,
+            color=self.text_color
         )
         
         self.draw_company_logo(canvas_obj)
@@ -1052,11 +1094,11 @@ class UIComponents:
 # ============================================================================
 
 class EmailValidator:
-    """Centralized email validation with attempt tracking."""
+    """Updated email validator - simplified attempt tracking."""
     
     @staticmethod
     def validate_with_attempts(email: str) -> Tuple[bool, str, Dict[str, Any]]:
-        """Validate email with attempt tracking."""
+        """Validate email with simplified attempt tracking."""
         if SecurityManager.is_workflow_completed():
             return False, "❌ Workflow already completed - validation locked", {}
         
@@ -1066,14 +1108,14 @@ class EmailValidator:
         if not validate_email_format(email):
             return False, "Invalid email format", {}
         
-        # Track attempts
+        # Track attempts for abuse prevention
         email_key = f"email_attempts_{email.lower().strip()}"
         current_attempts = st.session_state.get(email_key, 0) + 1
         st.session_state[email_key] = current_attempts
         
         # Prevent excessive attempts
         if current_attempts > AppConfig.MAX_EMAIL_ATTEMPTS:
-            return False, f"❌ Too many attempts ({current_attempts}). Please contact support.", {}
+            return False, f"❌ Too many attempts ({current_attempts}). Please refresh the page.", {}
         
         try:
             apps_script = get_apps_script_client()
@@ -1083,9 +1125,10 @@ class EmailValidator:
                 validation_data = validation_result.get("data", {})
                 validation_type = validation_data.get("validation_type", "unknown")
                 
+                # Simplified validation - no company fallback
                 message_map = {
                     "alias_list": "✅ Email found in authorized alias list",
-                    "company_fallback": f"✅ Company email accepted after {current_attempts} attempts",
+                    "company_fallback": "✅ Company email accepted",
                 }
                 
                 message = message_map.get(validation_type, "✅ Email validated successfully")
@@ -1136,82 +1179,6 @@ class FormProcessor:
         except Exception as e:
             st.error(f"Validation error: {str(e)}")
             return True, "Question ID accepted", {}
-    
-    @staticmethod
-    def process_metadata_form(question_id: str, prompt_text: str, model_combo: Tuple[str, str], 
-                             prompt_image: Optional[BinaryIO]) -> bool:
-        """Process and validate metadata form submission."""
-        if not all([question_id, prompt_text, model_combo]):
-            st.error("❌ Please fill in all required fields marked with *.")
-            return False
-        
-        # Validate Question ID
-        is_valid, message, sot_data = FormProcessor.validate_question_id(question_id)
-        
-        if not is_valid:
-            task_id = extract_task_id_from_question_id(question_id)
-            error_details = f"{message}"
-            if task_id:
-                error_details += f" (Extracted Task ID: {task_id})"
-            
-            st.error(f"❌ Validation Failed: {error_details}")
-            return False
-        
-        # Extract and store data
-        task_id = extract_task_id_from_question_id(question_id)
-        language = sot_data.get("language", "")
-        project_type = sot_data.get("project_type", "")
-        model_comparison = sot_data.get("model_comparison", "")
-        
-        # Parse model combination
-        if model_comparison:
-            sot_model1, sot_model2 = Utils.parse_model_combination(model_comparison)
-            if sot_model1 and sot_model2:
-                final_model1, final_model2 = sot_model1, sot_model2
-            else:
-                final_model1, final_model2 = model_combo[0], model_combo[1]
-        else:
-            final_model1, final_model2 = model_combo[0], model_combo[1]
-        
-        # Store in session state
-        session_data = {
-            'question_id': question_id,
-            'task_id': task_id,
-            'prompt_text': prompt_text,
-            'model1': final_model1,
-            'model2': final_model2,
-            'sot_language': language,
-            'sot_project_type': project_type,
-            'sot_model_comparison': model_comparison,
-            'question_id_validated': is_valid,
-        }
-        
-        for key, value in session_data.items():
-            st.session_state[key] = value
-        
-        if prompt_image:
-            st.session_state.prompt_image = prompt_image
-        
-        # Display success feedback
-        st.success("✅ Metadata saved and auto-populated from SOT!")
-        
-        if task_id:
-            st.info(f"🔍 **Task ID:** {task_id}")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if language:
-                st.success(f"📍 **Language:** {language}")
-            if project_type:
-                st.success(f"📂 **Project Type:** {project_type}")
-        with col2:
-            if model_comparison:
-                st.success(f"⚔️ **Model Pairing:** {model_comparison}")
-            else:
-                st.info(f"🤖 **Selected Models:** {final_model1} vs {final_model2}")
-        
-        st.balloons()
-        return True
     
     @staticmethod
     def process_drive_upload(user_email: str, filename: str) -> Optional[str]:
@@ -1289,15 +1256,15 @@ class FormProcessor:
             return False
 
 # ============================================================================
-# PAGE IMPLEMENTATIONS
+# PAGE IMPLEMENTATIONS - UPDATED WITH STEP 1 REFACTOR
 # ============================================================================
 
 class PageManager:
-    """Manage individual page implementations."""
+    """Manage individual page implementations with Step 1 refactor."""
     
     @staticmethod
     def render_metadata_input():
-        """Render metadata input page."""
+        """Render metadata input page with integrated email validation."""
         st.header("1️⃣ Metadata Input")
         
         if SecurityManager.is_workflow_completed():
@@ -1312,11 +1279,16 @@ class PageManager:
         </div>
         """, unsafe_allow_html=True)
         
+        form_data = {}
+        
         with st.form("metadata_form"):
-            col1, col2 = st.columns(2)
+            col1, col2 = st.columns([1, 1])
             
+            # === COLUMN 1: Question ID & Email ===
             with col1:
-                question_id = st.text_input(
+                st.markdown("**🔍 Identification**")
+                
+                form_data['question_id'] = st.text_input(
                     "Question ID *",
                     placeholder="e.g., bfdf67160ca3eca9b65f040e350b2f1f+bard_data+coach_P128628...",
                     help="Enter the unique identifier for this comparison",
@@ -1324,17 +1296,20 @@ class PageManager:
                     disabled=st.session_state.get('form_data_locked', False)
                 )
                 
-                model_combo = st.selectbox(
-                    "Select Model Combination *",
-                    options=MODEL_COMBINATIONS,
-                    format_func=lambda x: f"{x[0]} vs {x[1]}",
-                    help="Choose the models being compared",
-                    index=PageManager._get_model_combo_index(),
+                form_data['user_email'] = st.text_input(
+                    "Alias Email Address *",
+                    placeholder="i.e.  ops-chiron...@invisible.co", 
+                    help="Enter your CrC alias email address",
+                    value=st.session_state.get('user_email', ''),
                     disabled=st.session_state.get('form_data_locked', False)
                 )
             
+            # === COLUMN 2: Prompt & Image ===
             with col2:
-                prompt_text = st.text_area(
+                
+                st.markdown("**📝 Task Content**")
+                
+                form_data['prompt_text'] = st.text_area(
                     "Initial Prompt *",
                     placeholder="Enter the prompt used for both models...",
                     height=150,
@@ -1343,38 +1318,192 @@ class PageManager:
                     disabled=st.session_state.get('form_data_locked', False)
                 )
                 
-                prompt_image = st.file_uploader(
+                form_data['prompt_image'] = st.file_uploader(
                     "Prompt Image (Optional)",
                     type=AppConfig.SUPPORTED_IMAGE_TYPES,
                     help="Upload an image if the prompt included visual content",
                     disabled=st.session_state.get('form_data_locked', False)
                 )
                 
-                if prompt_image and not Utils.validate_file_size(prompt_image):
+                if form_data['prompt_image'] and not Utils.validate_file_size(form_data['prompt_image']):
                     st.error(f"Prompt image is too large (max {AppConfig.MAX_FILE_SIZE_MB}MB)")
-                    prompt_image = None
+                    form_data['prompt_image'] = None
             
+            # Form submit button (inside form)
             submitted = st.form_submit_button(
                 "💾 Save Metadata", 
                 type="primary",
                 disabled=st.session_state.get('form_data_locked', False)
             )
+        
+        # === PROCESS FORM SUBMISSION (Outside form) ===
+        if submitted:
+            validation_results = PageManager._process_step1_validation(form_data)
             
-            if submitted:
-                if FormProcessor.process_metadata_form(question_id, prompt_text, model_combo, prompt_image):
-                    PageManager._show_next_step_button("Metadata Input")
+            if validation_results.get('overall_success'):
+                # === VALIDATION STATUS DISPLAY ===
+                PageManager._display_step1_validation_status(form_data)
+                PageManager._display_step1_success_popups(validation_results)
+        
+        # === NEXT STEP BUTTON ===
+        if UIComponents.is_step_completed("Metadata Input"):
+            PageManager._show_next_step_button("Metadata Input")
     
     @staticmethod
-    def _get_model_combo_index() -> int:
-        """Get current model combination index."""
-        if 'model1' not in st.session_state or 'model2' not in st.session_state:
-            return 0
+    def _process_step1_validation(form_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process and validate all Step 1 form data."""
+        results = {
+            'question_id_valid': False,
+            'email_valid': False,
+            'overall_success': False,
+            'question_id_data': {},
+            'email_data': {},
+            'matched_models': None
+        }
         
-        current_combo = (st.session_state.model1, st.session_state.model2)
-        try:
-            return MODEL_COMBINATIONS.index(current_combo)
-        except ValueError:
-            return 0
+        # Check required fields
+        if not all([form_data.get('question_id'), form_data.get('user_email'), form_data.get('prompt_text')]):
+            st.error("❌ Please fill in all required fields marked with *.")
+            return results
+        
+        # Validate Question ID
+        if form_data['question_id']:
+            qid_valid, qid_message, qid_data = FormProcessor.validate_question_id(form_data['question_id'])
+            results['question_id_valid'] = qid_valid
+            results['question_id_message'] = qid_message
+            results['question_id_data'] = qid_data
+            
+            # Parse model combination from SOT data if available
+            if qid_valid and qid_data.get('model_comparison'):
+                sot_model1, sot_model2 = Utils.parse_model_combination(qid_data['model_comparison'])
+                if sot_model1 and sot_model2:
+                    results['matched_models'] = (sot_model1, sot_model2)
+        
+        # Validate Email
+        if form_data['user_email']:
+            email_valid, email_message, email_data = EmailValidator.validate_with_attempts(form_data['user_email'])
+            results['email_valid'] = email_valid
+            results['email_message'] = email_message
+            results['email_data'] = email_data
+        
+        # Check if Question ID validation failed
+        if not results['question_id_valid']:
+            st.error(f"❌ Question ID Validation Failed: {results.get('question_id_message', 'Invalid Question ID')}")
+            if results['question_id_data'].get('task_id'):
+                st.error(f"Extracted Task ID: {results['question_id_data']['task_id']}")
+            return results
+        
+        # Check if email validation failed
+        if not results['email_valid']:
+            st.error(f"❌ Email Validation Failed: {results.get('email_message', 'Invalid email')}")
+            return results
+        
+        # Overall success check
+        results['overall_success'] = results['question_id_valid'] and results['email_valid']
+        
+        if results['overall_success']:
+            # Store validated data in session state
+            session_updates = {
+                'question_id': form_data['question_id'],
+                'user_email': form_data['user_email'],
+                'prompt_text': form_data['prompt_text'],
+                'question_id_validated': True,
+                'email_validated': True,
+                'task_id': results['question_id_data'].get('task_id'),
+                'sot_language': results['question_id_data'].get('language', ''),
+                'sot_project_type': results['question_id_data'].get('project_type', ''),
+                'sot_model_comparison': results['question_id_data'].get('model_comparison', ''),
+            }
+            
+            # Set model information from SOT
+            if results['matched_models']:
+                session_updates['model1'] = results['matched_models'][0]
+                session_updates['model2'] = results['matched_models'][1]
+            else:
+                # If no SOT match, this indicates invalid Question ID
+                st.error("❌ Question ID is not valid - no model combination found in SOT")
+                return results
+            
+            # Store prompt image if provided
+            if form_data['prompt_image']:
+                session_updates['prompt_image'] = form_data['prompt_image']
+            
+            # Update session state
+            for key, value in session_updates.items():
+                st.session_state[key] = value
+        
+        return results
+    
+    @staticmethod
+    def _display_step1_validation_status(form_data: Dict[str, Any]):
+        """Display unified validation status below the form."""
+        if not (form_data.get('question_id') or form_data.get('user_email')):
+            return
+        
+        # Get current validation states from session
+        qid_validated = st.session_state.get('question_id_validated', False)
+        email_validated = st.session_state.get('email_validated', False)
+        
+        if qid_validated and email_validated:
+            st.success("✅ **All validations passed** - Question ID and Email are both verified")
+        else:
+            validation_status = []
+            
+            if form_data.get('question_id'):
+                if qid_validated:
+                    validation_status.append("✅ Question ID: Valid")
+                else:
+                    validation_status.append("❌ Question ID: Needs validation")
+            
+            if form_data.get('user_email'):
+                if email_validated:
+                    validation_status.append("✅ Email: Valid") 
+                else:
+                    email_attempts = EmailValidator.get_attempt_count(form_data['user_email'])
+                    attempt_text = f" ({email_attempts} attempts)" if email_attempts > 0 else ""
+                    validation_status.append(f"❌ Email: Needs validation{attempt_text}")
+            
+            if validation_status:
+                status_text = " | ".join(validation_status)
+                st.warning(f"⚠️ **Validation Status:** {status_text}")
+    
+    @staticmethod
+    def _display_step1_success_popups(validation_results: Dict[str, Any]):
+        
+        # Model Combination Popup (only if matched from SOT)
+        if validation_results['matched_models']:
+            model1, model2 = validation_results['matched_models']
+            
+            # Get brand colors for visual display
+            model1_config = ModelBrandManager.get_model_config(model1)
+            model2_config = ModelBrandManager.get_model_config(model2)
+            
+            st.markdown(f"""
+            <div style="background: #e3f2fd; 
+                        padding: 0.5rem; border-radius: 10px; margin: 0.5rem 0; 
+                        border-left: 4px solid {model1_config['color']};">
+                <h4 style="margin: 0; color: #0d47a1;">⚔️ SxS Comparison</h4>
+                <p style="margin: 0.1rem 0; font-size: 1.2rem; font-weight: 600;">
+                    <span style="color: {model1_config['color']};">{model1}</span> 
+                    <span style="color: #0d47a1;"> vs </span>
+                    <span style="color: {model2_config['color']};">{model2}</span>
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Task ID & Metadata Popup
+        qid_data = validation_results['question_id_data']
+        col1, col2 = st.columns(2)
+        
+        if qid_data.get('task_id'):
+                st.info(f"🔍 **Task ID:** {qid_data['task_id']}")
+        
+        with col1:
+            if qid_data.get('project_type'):
+                st.success(f"📂 **Project Type:** {qid_data['project_type']}")
+        with col2:
+            if qid_data.get('language'):
+                st.success(f"📍 **Language:** {qid_data['language']}")
     
     @staticmethod
     def render_image_upload():
@@ -1691,7 +1820,7 @@ class PageManager:
     
     @staticmethod
     def render_upload_to_drive():
-        """Render upload to drive page."""
+        """Render upload to drive page - simplified without email validation."""
         st.header("4️⃣ Upload to Drive & Submit")
         
         if SecurityManager.is_workflow_completed():
@@ -1704,7 +1833,41 @@ class PageManager:
             st.error("⚠️ Prerequisites Missing: Please complete Step 3 (PDF Generation) first.")
             return
         
-        PageManager._render_submission_form()
+        # Ensure email was validated in Step 1
+        if not st.session_state.get('email_validated') or not st.session_state.get('user_email'):
+            st.error("⚠️ Email validation missing. Please return to Step 1 to validate your email.")
+            return
+        
+        PageManager._render_simplified_submission_form()
+    
+    @staticmethod
+    def _render_simplified_submission_form():
+        """Render simplified submission form without email validation."""
+        # Get PDF info
+        filename = Utils.generate_filename(st.session_state.model1, st.session_state.model2)
+        st.session_state.pdf_buffer.seek(0)
+        pdf_data = st.session_state.pdf_buffer.read()
+        file_size_kb = len(pdf_data) / 1024
+        
+        st.markdown("""
+        <div style="background: #16213e; color: white; padding: 2rem; border-radius: 15px; margin: 1rem 0;">
+            <h3 style="text-align: center; margin-bottom: 2rem;">📋 Final Submission</h3>
+        """, unsafe_allow_html=True)
+        
+        # Display pre-validated email
+        st.markdown("### ✅ Pre-validated Email")
+        st.success(f"📧 **Email:** {st.session_state.user_email} (Validated in Step 1)")
+        
+        # Form data display
+        PageManager._render_form_data_display(filename, file_size_kb)
+        
+        # Drive upload section
+        PageManager._render_drive_upload_section(filename)
+        
+        # Final submission
+        PageManager._render_final_submission_section(filename, file_size_kb)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
     
     @staticmethod
     def _render_session_summary():
@@ -1734,71 +1897,6 @@ class PageManager:
                 st.session_state.current_page = "Metadata Input"
                 st.success("🆕 Ready for a new comparison!")
                 st.rerun()
-    
-    @staticmethod
-    def _render_submission_form():
-        """Render the submission form."""
-        # Get PDF info
-        filename = Utils.generate_filename(st.session_state.model1, st.session_state.model2)
-        st.session_state.pdf_buffer.seek(0)
-        pdf_data = st.session_state.pdf_buffer.read()
-        file_size_kb = len(pdf_data) / 1024
-        
-        st.markdown("""
-        <div style="background: #16213e; color: white; padding: 2rem; border-radius: 15px; margin: 1rem 0;">
-            <h3 style="text-align: center; margin-bottom: 2rem;">📋 Submission Form</h3>
-        """, unsafe_allow_html=True)
-        
-        # Email validation section
-        PageManager._render_email_validation_section()
-        
-        # Form data display
-        PageManager._render_form_data_display(filename, file_size_kb)
-        
-        # Drive upload section
-        PageManager._render_drive_upload_section(filename)
-        
-        # Final submission
-        PageManager._render_final_submission_section(filename, file_size_kb)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    @staticmethod
-    def _render_email_validation_section():
-        """Render email validation section."""
-        st.markdown("### 📧 Email Validation")
-        
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            user_email = st.text_input(
-                "Email Address *",
-                placeholder="your.ops-chiron@invisible.co or your.name@invisible.email",
-                key="email_input_form",
-                disabled=st.session_state.get('form_data_locked', False),
-                value=st.session_state.get('user_email', '')
-            )
-        
-        with col2:
-            if st.button("🔍 Validate", disabled=not user_email or st.session_state.get('email_validated', False)):
-                if user_email:
-                    with st.spinner("Validating..."):
-                        is_valid, message, _ = EmailValidator.validate_with_attempts(user_email)
-                        if is_valid:
-                            st.success(message)
-                            st.session_state.email_validated = True
-                            st.session_state.user_email = user_email
-                        else:
-                            st.error(message)
-                            st.session_state.email_validated = False
-        
-        # Show validation status
-        if st.session_state.get('email_validated', False):
-            st.success("✅ Email validated successfully")
-        elif user_email:
-            attempt_count = EmailValidator.get_attempt_count(user_email)
-            if attempt_count > 0:
-                st.info(f"Validation attempts: {attempt_count}")
     
     @staticmethod
     def _render_form_data_display(filename: str, file_size_kb: float):
@@ -1919,9 +2017,10 @@ class PageManager:
         
         #### 1️⃣ Metadata Input
         - Enter the **Question ID** (🛈 top right in CrC task)
-        - Select the **Model Combination** being compared
+        - Enter your **authorized email address**
         - Enter the **Initial Prompt** used for both models
         - Optionally upload a **Prompt Image**
+        - Both Question ID and email are validated automatically
         
         #### 2️⃣ Image Upload
         - Upload screenshots for both models
@@ -1936,23 +2035,28 @@ class PageManager:
         - **Download** the generated PDF file
         
         #### 4️⃣ Upload to Drive & Submit
-        - Enter your **email address** for validation
         - Review all populated data from previous steps
         - Click **Upload** to upload to Drive (one-time only)
         - Click **Submit** to complete the process (one-time only)
         
         ### 📄 PDF Structure
         1. **Title Page**: Question ID, Prompt, and optional image
-        2. **First Model Brand Page**: Model name
+        2. **First Model Brand Page**: Model name with brand styling
         3. **First Model Screenshots**: One image per slide
-        4. **Second Model Brand Page**: Model name
+        4. **Second Model Brand Page**: Model name with brand styling
         5. **Second Model Screenshots**: One image per slide
+        
+        ### 🎨 Brand Recognition
+        - **Google/Gemini Models**: Blue styling (#4285f4)
+        - **OpenAI Models**: Green styling (#10a37f)
+        - **Anthropic Models**: Orange styling (#d97706)
+        - **Meta Models**: Blue styling (#1877f2)
         
         ### 🔒 Security Features
         - **Single submission per session** - prevents duplicate uploads
         - **Workflow locking** - completed sessions cannot be modified
         - **Session tracking** - unique IDs for audit trails
-        - **Anti-exploitation** - comprehensive protection against form abuse
+        - **Integrated validation** - SOT-based model recognition
         """)
     
     @staticmethod
@@ -1962,26 +2066,26 @@ class PageManager:
         ### 🔧 Troubleshooting
         
         #### Common Issues:
-        - **Email validation fails**: Ensure email is in authorized alias list or use company email (@invisible.email) after 3 attempts
+        - **Question ID validation fails**: Ensure Question ID exists in SOT spreadsheet
+        - **Email validation fails**: Ensure email is in authorized alias list
+        - **No model combination found**: Question ID must have matching model pairing in SOT
         - **File too large**: All files must be under 50MB
         - **PDF generation fails**: Check image formats and try again
         - **Upload fails**: Ensure stable internet connection
         - **Form submission disabled**: Complete all required steps first
         - **"Already submitted" error**: Session is locked after completion - start new session
-        - **Navigation locked**: Workflow completed - only Help and Upload pages available
         
-        #### Security-Related Issues:
-        - **Drive upload locked**: Upload already completed for this session
-        - **Form submission locked**: Form already submitted successfully
-        - **Workflow completed**: All actions locked - start new session to continue
-        - **Session expired**: Clear browser cache and start new session
+        #### Step 1 Specific Issues:
+        - **SOT connection fails**: Check system status in sidebar
+        - **Brand colors not showing**: Clear browser cache and refresh
+        - **Model combination not auto-populated**: Question ID may not exist in SOT
+        - **Email attempts exceeded**: Contact support for assistance
         
         #### Best Practices:
         - Use high-resolution screenshots (1920x1080 recommended)
         - Compress large images before upload using online tools
         - Ensure images are in supported formats (PNG, JPG, JPEG)
-        - Complete all steps in order for best results
-        - Test connection before starting long sessions
+        - Complete all validations in Step 1 before proceeding
         - **Do not refresh page during uploads** - may cause session issues
         - **Complete workflow in one session** - avoid leaving partially completed
         """)
@@ -1992,12 +2096,10 @@ class PageManager:
         st.markdown("""
         ### 📊 Examples
         
-        #### Supported Model Combinations:
-        - **Bard 2.5 Pro** vs **AIS 2.5 PRO**
-        - **AIS 2.5 PRO** vs **cGPT o3**
-        - **AIS 2.5 Flash** vs **cGPT 4o**
-        - **Bard 2.5 Pro** vs **cGPT o3**  
-        - **Bard 2.5 Flash** vs **cGPT 4o**
+        #### SOT-Based Model Recognition:
+        The app automatically recognizes model combinations from your SOT spreadsheet:
+        - **Question ID** → **Task ID extraction** → **SOT lookup** → **Model pairing**
+        - Example: `coach_P128631...` → `Bard 2.5 Pro vs. AIS 2.5 PRO`
         
         #### Question ID → Task ID Mapping:
         **Sample Question ID:**
@@ -2008,16 +2110,16 @@ class PageManager:
         ```
         coach_P128631_quality_sxs_e2e_experience_learning_and_academic_help_frozen_pool_human_eval_en-US-50
         ```
-        **Auto-populated:**
+        **Auto-populated from SOT:**
         - Language: `en-US`
         - Model Comparison: `Bard 2.5 Pro vs. AIS 2.5 Pro`
         - Project Type: `Learning & Academic Help`
         
-        #### Email Validation Process:
-        1. **Check Alias List**: Email must be registered in authorized list
-        2. **Company Fallback**: @invisible.email emails accepted after 3 failed attempts
-        3. **Format Validation**: Must be valid email format
-        4. **Security Check**: Session-based validation tracking
+        #### Brand Recognition Examples:
+        - **"Bard 2.5 Pro"** → Google Blue + "Gemini" brand
+        - **"AIS 2.5 PRO"** → Google Blue + "Google AI Studio" brand  
+        - **"cGPT o3"** → OpenAI Green + "OpenAI" brand
+        - **"Claude"** → Anthropic Orange + "Anthropic" brand
         
         #### Sample Email Formats:
         ```
@@ -2041,6 +2143,12 @@ class PageManager:
         - **Session Locking**: Completed workflows cannot be modified
         - **Navigation Restrictions**: Locked sessions have limited page access
         
+        #### Enhanced Step 1 Security:
+        - **Integrated Validation**: Both Question ID and email validated together
+        - **SOT-Based Model Recognition**: Prevents invalid model combinations
+        - **Brand Awareness**: Automatic styling prevents spoofing
+        - **Early Email Validation**: Prevents incomplete workflows
+        
         #### Session Management:
         - **Unique Session IDs**: Every session gets cryptographic identifier
         - **Timestamp Tracking**: All actions are logged with precise timestamps
@@ -2059,13 +2167,14 @@ class PageManager:
         - **Secure Transmission**: HTTPS encryption for all communications
         - **Access Control**: Email-based authorization required
         - **Audit Trail**: Complete logging of all user actions
+        - **Brand Recognition Caching**: Secure color coding system
         
         #### Best Security Practices:
         - **Complete workflow in one session** - avoid partial completion
         - **Don't share session URLs** - each session is user-specific
         - **Use authorized email addresses** - validation is strictly enforced
+        - **Verify SOT data accuracy** - ensures correct model recognition
         - **Start new session for new comparisons** - don't reuse completed sessions
-        - **Report security issues** - help us maintain system integrity
         """)
     
     @staticmethod
@@ -2189,6 +2298,11 @@ class SidebarManager:
                 else:
                     st.sidebar.error("❌ Email validation: Unavailable")
                 
+                if "🏠 SOT" in tabs_found:
+                    st.sidebar.text("✅ SOT lookup: Ready")
+                else:
+                    st.sidebar.error("❌ SOT lookup: Unavailable")
+                
                 st.sidebar.text(f"📊 Tabs: {len(tabs_found)} found")
             else:
                 st.sidebar.error("🔴 System Offline")
@@ -2205,19 +2319,29 @@ class SidebarManager:
         """Render current session information."""
         if 'question_id' in st.session_state:
             st.sidebar.markdown("### 📋 Current Session")
-            st.sidebar.info(f"**Question ID:** {st.session_state.question_id[:20]}...")
-            
-            if st.session_state.get('task_id'):
-                st.sidebar.info(f"**Task ID:** {st.session_state.task_id[:30]}...")
+        
             
             if 'model1' in st.session_state and 'model2' in st.session_state:
-                st.sidebar.info(f"**Models:** {st.session_state.model1} vs {st.session_state.model2}")
+                # Show with brand colors
+                model1_config = ModelBrandManager.get_model_config(st.session_state.model1)
+                model2_config = ModelBrandManager.get_model_config(st.session_state.model2)
+                
+                st.sidebar.markdown(f"""
+                **Models:** 
+                <span style="color: {model1_config['color']};">{st.session_state.model1}</span> vs 
+                <span style="color: {model2_config['color']};">{st.session_state.model2}</span>
+                """, unsafe_allow_html=True)
             
+            st.sidebar.info(f"**Question ID:** {st.session_state.question_id[:20]}...")
+
             if st.session_state.get('sot_language'):
                 st.sidebar.info(f"**Language:** {st.session_state.sot_language}")
             
             if st.session_state.get('sot_project_type'):
                 st.sidebar.info(f"**Project:** {st.session_state.sot_project_type}")
+            
+            if st.session_state.get('user_email'):
+                st.sidebar.info(f"**Email:** {st.session_state.user_email[:25]}...")
     
     @staticmethod
     def render_session_stats():
@@ -2241,13 +2365,18 @@ class SidebarManager:
         
         # Security status indicators
         security_items = [
+            ("Question ID", st.session_state.get('question_id_validated', False)),
+            ("Email", st.session_state.get('email_validated', False)),
             ("Drive Upload", st.session_state.get('drive_upload_locked', False)),
             ("Form Submit", st.session_state.get('submission_locked', False)),
             ("Workflow", st.session_state.get('workflow_completed', False)),
         ]
         
-        for item_name, is_locked in security_items:
-            status = "🔒 Locked" if is_locked else "🔓 Available"
+        for item_name, is_validated_or_locked in security_items:
+            if item_name in ["Question ID", "Email"]:
+                status = "✅ Valid" if is_validated_or_locked else "❌ Pending"
+            else:
+                status = "🔒 Locked" if is_validated_or_locked else "🔓 Available"
             st.sidebar.text(f"{item_name}: {status}")
 
 # ============================================================================
@@ -2276,6 +2405,7 @@ def main():
     <div class="main-header">
         <h1>🖨️ SxS Model Comparison PDF Generator</h1>
         <p>Generate standardized PDF documents for side-by-side LLM comparisons</p>
+        <small style="opacity: 0.8;">v2.1.0 - SOT-Based Model Recognition & Email Integration</small>
     </div>
     """, unsafe_allow_html=True)
     
