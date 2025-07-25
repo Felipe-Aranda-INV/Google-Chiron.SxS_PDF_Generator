@@ -35,7 +35,6 @@ PAGE_CONFIG = {
 class AppConfig:
     # Google Apps Script Integration
     WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxeqphIFWgbP5-71n5ws4w5JQOya_2q-RowAzHR9XoVY-0bPQ9M03gapkb4siEGBUHD/exec"
-    # st.secrets.get("webhook_url", "")
     WEBHOOK_TIMEOUT = 30
     
     # File Handling
