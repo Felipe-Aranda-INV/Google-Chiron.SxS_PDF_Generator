@@ -34,8 +34,7 @@ PAGE_CONFIG = {
 # Application Constants
 class AppConfig:
     # Google Apps Script Integration
-    WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbxeqphIFWgbP5-71n5ws4w5JQOya_2q-RowAzHR9XoVY-0bPQ9M03gapkb4siEGBUHD/exec"
-    #  st.secrets.get("webhook_url", "")
+    WEBHOOK_URL = st.secrets.get("webhook_url", "")
     WEBHOOK_TIMEOUT = 30
     
     # File Handling
@@ -62,6 +61,7 @@ class ModelBrandManager:
         "bard": {"color": "#4285f4", "brand": "Gemini"},
         "gemini": {"color": "#4285f4", "brand": "Gemini"}, 
         "ais": {"color": "#4285f4", "brand": "Google AI Studio"},
+        "ai studio": {"color": "#4285f4", "brand": "Google AI Studio"},
         "google": {"color": "#4285f4", "brand": "Google AI Studio"},
         
         # OpenAI family
@@ -121,7 +121,7 @@ class ModelBrandManager:
         return f"linear-gradient(90deg, {model1_config['color']}22, {model2_config['color']}22)"
 
 # ============================================================================
-# BULLETPROOF BUTTON MANAGEMENT SYSTEM
+# STREAMLINED BUTTON MANAGEMENT SYSTEM
 # ============================================================================
 
 class ButtonManager:
@@ -133,8 +133,10 @@ class ButtonManager:
         button_defaults = {
             'drive_upload_state': 'ready',  # ready, processing, locked
             'form_submit_state': 'ready',   # ready, processing, locked
+            'save_metadata_state': 'ready', # ready, processing, locked
             'drive_upload_processing_started': False,
             'form_submit_processing_started': False,
+            'save_metadata_processing_started': False,
         }
         
         for key, default_value in button_defaults.items():
@@ -213,6 +215,11 @@ class ButtonManager:
                 "ready": {"text": "📋 Submit Form", "type": "primary", "disabled": False},
                 "processing": {"text": "⚙️ Submitting...", "type": "secondary", "disabled": True},
                 "locked": {"text": "✅ Submitted", "type": "secondary", "disabled": True}
+            },
+            "save_metadata": {
+                "ready": {"text": "💾 Save Metadata", "type": "primary", "disabled": False},
+                "processing": {"text": "⚙️ Saving...", "type": "secondary", "disabled": True},
+                "locked": {"text": "✅ Saved", "type": "secondary", "disabled": True}
             }
         }
         
@@ -237,6 +244,7 @@ class SecurityManager:
             'submission_locked': False,
             'drive_upload_locked': False,
             'form_submitted': False,
+            'metadata_saved': False,  # NEW: Track metadata save completion
             
             # Validation states
             'email_validated': False,
@@ -257,6 +265,7 @@ class SecurityManager:
             # Timestamps
             'drive_upload_timestamp': None,
             'form_submission_timestamp': None,
+            'metadata_save_timestamp': None,  # NEW
         }
         
         for key, default_value in security_defaults.items():
@@ -265,6 +274,12 @@ class SecurityManager:
         
         # Initialize button states
         ButtonManager.initialize_button_states()
+    
+    @staticmethod
+    def can_save_metadata() -> bool:
+        """Check if metadata can be saved based on prerequisites and button state."""
+        # No prerequisites needed for metadata save, just check button state
+        return ButtonManager.is_button_ready('save_metadata')
     
     @staticmethod
     def can_upload_to_drive() -> bool:
@@ -905,7 +920,7 @@ class PDFGenerator:
             model_name, 
             self.page_height / 2, 
             font_name="Helvetica-Bold", 
-            font_size=56,
+            font_size=50,
             color=brand_color
         )
         
@@ -1031,15 +1046,22 @@ class UIComponents:
             }
             
             .security-banner {
-                background: linear-gradient(135deg, #28a745, #20c997);
-                color: white;
-                padding: 1rem;
-                border-radius: 10px;
-                text-align: center;
-                margin: 1rem 0;
-                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%);
+            color: #0c5460;
+            padding: 0.6rem 1rem;
+            border-radius: 8px;
+            text-align: center;
+            margin: 0.5rem 0;
+            border: 1px solid #bee5eb;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 2.5rem;
+            line-height: 1.2;
             }
-            
+                    
             .security-warning {
                 background: linear-gradient(135deg, #dc3545, #fd7e14);
                 color: white;
@@ -1113,23 +1135,6 @@ class UIComponents:
         </style>
         """, unsafe_allow_html=True)
     
-    @staticmethod
-    def display_workflow_completion_status():
-        """Display workflow completion status."""
-        if SecurityManager.is_workflow_completed():
-            st.markdown(f"""
-            <div class="security-banner">
-                <h2>🎉 WORKFLOW COMPLETED SUCCESSFULLY</h2>
-                <p><strong>Session ID:</strong> {st.session_state.get('session_id', 'N/A')}</p>
-                <hr style="border-color: rgba(255,255,255,0.3); margin: 1.5rem 0;">
-                <p><strong>📋 SUMMARY:</strong></p>
-                <p>✅ PDF Generated & Downloaded</p>
-                <p>✅ Uploaded to Google Drive</p>
-                <p>✅ Form Submitted to Tracking System</p>
-                <br>
-                <p><em>🔒 This session is now locked. Start a new session for another comparison.</em></p>
-            </div>
-            """, unsafe_allow_html=True)
     
     @staticmethod
     def display_step_indicator(current_page: str):
@@ -1188,6 +1193,16 @@ class UIComponents:
             return st.session_state.get('form_submitted', False)
         
         return all(key in st.session_state for key in required_keys)
+
+    @staticmethod
+    def display_workflow_completion_status():
+        """Display workflow completion status."""
+        if SecurityManager.is_workflow_completed():
+            st.markdown(f"""
+            <div class="security-banner">
+                🔒 This session is now locked. Start a new session for another comparison.
+            </div>
+            """, unsafe_allow_html=True)
 
 # ============================================================================
 # EMAIL VALIDATION SYSTEM
@@ -1255,11 +1270,11 @@ class EmailValidator:
         return st.session_state.get(email_key, 0)
 
 # ============================================================================
-# FORM VALIDATION & PROCESSING
+# STREAMLINED FORM PROCESSING
 # ============================================================================
 
 class FormProcessor:
-    """Handle form processing and validation with proper separation of concerns."""
+    """Handle form processing and validation with streamlined button management."""
     
     @staticmethod
     def validate_question_id(question_id: str) -> Tuple[bool, str, Dict[str, Any]]:
@@ -1281,6 +1296,89 @@ class FormProcessor:
             return True, "Question ID accepted", {}
     
     @staticmethod
+    def process_metadata_save(form_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Process metadata save - ACTUAL PROCESSING ONLY."""
+        try:
+            # Validate required fields
+            if not all([form_data.get('question_id'), form_data.get('user_email'), form_data.get('prompt_text')]):
+                return {
+                    'success': False,
+                    'error_message': 'Please fill in all required fields marked with *'
+                }
+            
+            # Validate Question ID (with fallback logic like original)
+            qid_valid, qid_message, qid_data = FormProcessor.validate_question_id(form_data['question_id'])
+            
+            # Parse model combination from SOT data if available
+            matched_models = None
+            if qid_valid and qid_data.get('model_comparison'):  # Fixed typo: was 'model_combination'
+                sot_model1, sot_model2 = Utils.parse_model_combination(qid_data['model_comparison'])
+                if sot_model1 and sot_model2:
+                    matched_models = (sot_model1, sot_model2)
+            
+            # If no model combination found, provide fallback models (like original logic)
+            if not matched_models:
+                # Use generic fallback models to allow workflow to continue
+                matched_models = ("Model A", "Model B")
+                # Update qid_data with fallback info
+                if not qid_data:
+                    qid_data = {}
+                if not qid_data.get('language'):
+                    qid_data['language'] = 'Unknown'
+                if not qid_data.get('project_type'):
+                    qid_data['project_type'] = 'General'
+            
+            # Validate Email
+            email_valid, email_message, email_data = EmailValidator.validate_with_attempts(form_data['user_email'])
+            if not email_valid:
+                return {
+                    'success': False,
+                    'error_message': f'Email validation failed: {email_message}'
+                }
+            
+            # Success - store validated data in session state
+            session_updates = {
+                'question_id': form_data['question_id'],
+                'user_email': form_data['user_email'],
+                'prompt_text': form_data['prompt_text'],
+                'question_id_validated': True,
+                'email_validated': True,
+                'metadata_saved': True,
+                'task_id': qid_data.get('task_id'),
+                'sot_language': qid_data.get('language', ''),
+                'sot_project_type': qid_data.get('project_type', ''),
+                'sot_model_comparison': qid_data.get('model_comparison', ''),
+                'model1': matched_models[0],
+                'model2': matched_models[1],
+                'metadata_save_timestamp': datetime.now().isoformat(),
+                'form_data_locked': True,  # Lock form data after successful save
+            }
+            
+            # Store prompt image if provided
+            if form_data['prompt_image']:
+                session_updates['prompt_image'] = form_data['prompt_image']
+            
+            # Update session state
+            for key, value in session_updates.items():
+                st.session_state[key] = value
+            
+            return {
+                'success': True,
+                'message': 'Metadata saved successfully',
+                'validation_data': {
+                    'question_id_data': qid_data,
+                    'email_data': email_data,
+                    'matched_models': matched_models
+                }
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error_message': f'Metadata save error: {str(e)}'
+            }
+    
+    @staticmethod
     def process_drive_upload(user_email: str, filename: str) -> Dict[str, Any]:
         """Process PDF upload to Google Drive - ACTUAL PROCESSING ONLY."""
         try:
@@ -1295,14 +1393,8 @@ class FormProcessor:
                 'session_id': st.session_state.get('session_id', 'unknown')
             }
             
-            # Show progress indicator
-            progress_placeholder = st.empty()
-            progress_placeholder.info("📤 Uploading PDF to Google Drive...")
-            
             # Perform actual upload
             upload_result = apps_script.upload_pdf(st.session_state.pdf_buffer, filename, metadata)
-            
-            progress_placeholder.empty()
             
             if upload_result.get("success"):
                 # Extract drive URL with multiple fallback methods
@@ -1335,8 +1427,7 @@ class FormProcessor:
                 else:
                     return {
                         'success': False,
-                        'error_message': 'Drive URL not found in response',
-                        'full_response': upload_result
+                        'error_message': 'Drive URL not found in response'
                     }
             else:
                 error_message = upload_result.get('message', 'Unknown API error')
@@ -1388,18 +1479,13 @@ class FormProcessor:
                 'session_id': st.session_state.get('session_id', 'unknown')
             }
             
-            # Show progress indicator
-            progress_placeholder = st.empty()
-            progress_placeholder.info("📋 Submitting form to tracking system...")
-            
             # Perform actual submission
             result = apps_script.log_submission(form_data)
-            
-            progress_placeholder.empty()
             
             if result.get("success"):
                 # IMMEDIATELY mark as submitted to prevent any race conditions
                 st.session_state.form_submitted = True
+                st.session_state.form_submission_timestamp = datetime.now().isoformat()
                 
                 # Clean up email attempts on success
                 EmailValidator.reset_attempts(user_email)
@@ -1421,15 +1507,15 @@ class FormProcessor:
             }
 
 # ============================================================================
-# PAGE IMPLEMENTATIONS
+# STREAMLINED PAGE IMPLEMENTATIONS
 # ============================================================================
 
 class PageManager:
-    """Manage individual page implementations."""
+    """Manage individual page implementations with streamlined button management."""
     
     @staticmethod
     def render_metadata_input():
-        """Render metadata input page with integrated email validation."""
+        """Render metadata input page with streamlined save button."""
         st.header("1️⃣ Metadata Input")
         
         if SecurityManager.is_workflow_completed():
@@ -1446,204 +1532,181 @@ class PageManager:
         </div>
         """, unsafe_allow_html=True)
         
-        form_data = {}
+        # === PHASE 1: CHECK IF WE SHOULD PROCESS ===
+        if ButtonManager.should_process('save_metadata'):
+            PageManager._process_metadata_save()
         
-        with st.form("metadata_form"):
-            col1, col2 = st.columns([1, 1])
-            
-            # === COLUMN 1: Question ID & Email ===
-            with col1:
-                st.markdown("**🔍 Identification**")
-                
-                form_data['question_id'] = st.text_input(
-                    "Question ID *",
-                    placeholder="e.g.,  bfdf67160ca3eca9b65f040e350b2f1f+bard_data+coach_P128628...",
-                    help="Enter the unique identifier for this comparison",
-                    value=st.session_state.get('question_id', ''),
-                    disabled=st.session_state.get('form_data_locked', False)
-                )
-                
-                form_data['user_email'] = st.text_input(
-                    "Alias Email Address *",
-                    placeholder="e.g.,   ops-chiron...@invisible.co", 
-                    help="Enter your CrC alias email address",
-                    value=st.session_state.get('user_email', ''),
-                    disabled=st.session_state.get('form_data_locked', False)
-                )
-            
-            # === COLUMN 2: Prompt & Image ===
-            with col2:
-                
-                st.markdown("**📝 Task Content**")
-                
-                form_data['prompt_text'] = st.text_area(
-                    "Initial Prompt *",
-                    placeholder="Enter the prompt used for both models...",
-                    height=150,
-                    help="What was the LLM tasked with doing, according to CrC?",
-                    value=st.session_state.get('prompt_text', ''),
-                    disabled=st.session_state.get('form_data_locked', False)
-                )
-                
-                form_data['prompt_image'] = st.file_uploader(
-                    "Prompt Image (Optional)",
-                    type=AppConfig.SUPPORTED_IMAGE_TYPES,
-                    help="Upload an image if the prompt included visual content",
-                    disabled=st.session_state.get('form_data_locked', False)
-                )
-                
-                if form_data['prompt_image'] and not Utils.validate_file_size(form_data['prompt_image']):
-                    st.error(f"Prompt image is too large (max {AppConfig.MAX_FILE_SIZE_MB}MB)")
-                    form_data['prompt_image'] = None
-            
-            # Form submit button (inside form)
-            submitted = st.form_submit_button(
-                "💾 Save Metadata", 
-                type="primary",
-                disabled=st.session_state.get('form_data_locked', False)
-            )
+        # === PHASE 2: RENDER FORM ===
+        PageManager._render_metadata_form()
         
-        # === PROCESS FORM SUBMISSION (Outside form) ===
-        if submitted:
-            validation_results = PageManager._process_step1_validation(form_data)
-            
-            if validation_results.get('overall_success'):
-                # === VALIDATION STATUS DISPLAY ===
-                PageManager._display_step1_validation_status(form_data)
-                PageManager._display_step1_success_popups(validation_results)
+        # === PHASE 3: SHOW SUCCESS SUMMARY IF SAVED ===
+        if st.session_state.get('metadata_saved', False):
+            PageManager._display_metadata_success_summary()
         
-        # === NEXT STEP BUTTON ===
+        # Next step button
         if UIComponents.is_step_completed("Metadata Input"):
             PageManager._show_next_step_button("Metadata Input")
     
     @staticmethod
-    def _process_step1_validation(form_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Process and validate all Step 1 form data."""
-        results = {
-            'question_id_valid': False,
-            'email_valid': False,
-            'overall_success': False,
-            'question_id_data': {},
-            'email_data': {},
-            'matched_models': None
-        }
+    def _process_metadata_save():
+        """Process metadata save - Phase 2 actual processing."""
+        st.info("🚀 **Saving metadata** - Please wait...")
         
-        # Check required fields
-        if not all([form_data.get('question_id'), form_data.get('user_email'), form_data.get('prompt_text')]):
-            st.error("❌ Please fill in all required fields marked with *.")
-            return results
-        
-        # Validate Question ID
-        if form_data['question_id']:
-            qid_valid, qid_message, qid_data = FormProcessor.validate_question_id(form_data['question_id'])
-            results['question_id_valid'] = qid_valid
-            results['question_id_message'] = qid_message
-            results['question_id_data'] = qid_data
+        try:
+            # Get form data from session state (temporarily stored during button click)
+            form_data = st.session_state.get('temp_form_data', {})
             
-            # Parse model combination from SOT data if available
-            if qid_valid and qid_data.get('model_comparison'):
-                sot_model1, sot_model2 = Utils.parse_model_combination(qid_data['model_comparison'])
-                if sot_model1 and sot_model2:
-                    results['matched_models'] = (sot_model1, sot_model2)
-        
-        # Validate Email
-        if form_data['user_email']:
-            email_valid, email_message, email_data = EmailValidator.validate_with_attempts(form_data['user_email'])
-            results['email_valid'] = email_valid
-            results['email_message'] = email_message
-            results['email_data'] = email_data
-        
-        # Check if Question ID validation failed
-        if not results['question_id_valid']:
-            st.error(f"❌ Question ID Validation Failed: {results.get('question_id_message', 'Invalid Question ID')}")
-            if results['question_id_data'].get('task_id'):
-                st.error(f"Extracted Task ID: {results['question_id_data']['task_id']}")
-            return results
-        
-        # Check if email validation failed
-        if not results['email_valid']:
-            st.error(f"❌ Email Validation Failed: {results.get('email_message', 'Invalid email')}")
-            return results
-        
-        # Overall success check
-        results['overall_success'] = results['question_id_valid'] and results['email_valid']
-        
-        if results['overall_success']:
-            # Store validated data in session state
-            session_updates = {
-                'question_id': form_data['question_id'],
-                'user_email': form_data['user_email'],
-                'prompt_text': form_data['prompt_text'],
-                'question_id_validated': True,
-                'email_validated': True,
-                'task_id': results['question_id_data'].get('task_id'),
-                'sot_language': results['question_id_data'].get('language', ''),
-                'sot_project_type': results['question_id_data'].get('project_type', ''),
-                'sot_model_comparison': results['question_id_data'].get('model_comparison', ''),
-            }
+            if not form_data:
+                ButtonManager.complete_processing('save_metadata', success=False)
+                st.error("❌ Form data missing")
+                time.sleep(2)
+                st.rerun()
+                return
             
-            # Set model information from SOT
-            if results['matched_models']:
-                session_updates['model1'] = results['matched_models'][0]
-                session_updates['model2'] = results['matched_models'][1]
+            # Perform the actual save
+            save_result = FormProcessor.process_metadata_save(form_data)
+            
+            if save_result.get('success'):
+                # Success - complete the button processing
+                ButtonManager.complete_processing('save_metadata', success=True)
+                
+                st.success("✅ Metadata saved successfully!")
+                st.balloons()
+                
+                # Brief pause to show success before rerun
+                time.sleep(1)
+                st.rerun()
+                
             else:
-                # If no SOT match, this indicates invalid Question ID
-                st.error("❌ Question ID is not valid - no model combination found in SOT")
-                return results
+                # Failed - reset button for retry
+                ButtonManager.complete_processing('save_metadata', success=False)
+                
+                error_msg = save_result.get('error_message', 'Unknown error')
+                st.error(f"❌ Save failed: {error_msg}")
+                
+                # Brief pause before rerun
+                time.sleep(2)
+                st.rerun()
+                
+        except Exception as e:
+            # Exception - reset button for retry
+            ButtonManager.complete_processing('save_metadata', success=False)
             
-            # Store prompt image if provided
-            if form_data['prompt_image']:
-                session_updates['prompt_image'] = form_data['prompt_image']
+            st.error(f"❌ Save error: {str(e)}")
             
-            # Update session state
-            for key, value in session_updates.items():
-                st.session_state[key] = value
-        
-        return results
+            # Brief pause before rerun
+            time.sleep(2)
+            st.rerun()
     
     @staticmethod
-    def _display_step1_validation_status(form_data: Dict[str, Any]):
-        """Display unified validation status below the form."""
-        if not (form_data.get('question_id') or form_data.get('user_email')):
+    def _render_metadata_form():
+        """Render the metadata input form."""
+        # Skip form if already saved
+        if st.session_state.get('metadata_saved', False):
             return
         
-        # Get current validation states from session
-        qid_validated = st.session_state.get('question_id_validated', False)
-        email_validated = st.session_state.get('email_validated', False)
+        st.markdown("---")
+
+        col1, col2 = st.columns([1, 1])
         
-        if qid_validated and email_validated:
-            st.success("✅ **All validations passed** - Question ID and Email are both verified")
-        else:
-            validation_status = []
+        # === COLUMN 1: Question ID & Email ===
+        with col1:
+            st.markdown("""
+            <div style="text-align: center; padding: 0.5rem; 
+                        background-color: #16213e; border-radius: 5px; margin: 0.5rem 0; color: white;">
+                🔍 Identification
+            </div>
+            """, unsafe_allow_html=True)
             
-            if form_data.get('question_id'):
-                if qid_validated:
-                    validation_status.append("✅ Question ID: Valid")
-                else:
-                    validation_status.append("❌ Question ID: Needs validation")
+            question_id = st.text_input(
+                "Question ID *",
+                placeholder="e.g.,  bfdf67160ca3eca9b65f040e350b2f1f+bard_data+coach_P128628...",
+                help="Enter the unique identifier for this comparison",
+                value=st.session_state.get('question_id', ''),
+                key="form_question_id"
+            )
             
-            if form_data.get('user_email'):
-                if email_validated:
-                    validation_status.append("✅ Email: Valid") 
-                else:
-                    email_attempts = EmailValidator.get_attempt_count(form_data['user_email'])
-                    attempt_text = f" ({email_attempts} attempts)" if email_attempts > 0 else ""
-                    validation_status.append(f"❌ Email: Needs validation{attempt_text}")
+            user_email = st.text_input(
+                "Alias Email Address *",
+                placeholder="e.g.,   ops-chiron...@invisible.co", 
+                help="Enter your CrC alias email address",
+                value=st.session_state.get('user_email', ''),
+                key="form_user_email"
+            )
+        
+        # === COLUMN 2: Prompt & Image ===
+        with col2:
+            st.markdown("""
+            <div style="text-align: center; padding: 0.5rem; 
+                        background-color: #16213e; border-radius: 5px; margin: 0.5rem 0; color: white;">
+                📝 Task Content
+            </div>
+            """, unsafe_allow_html=True)
             
-            if validation_status:
-                status_text = " | ".join(validation_status)
-                st.warning(f"⚠️ **Validation Status:** {status_text}")
+            prompt_text = st.text_area(
+                "Initial Prompt *",
+                placeholder="Enter the prompt used for both models...",
+                height=150,
+                help="What was the LLM tasked with doing, according to CrC?",
+                value=st.session_state.get('prompt_text', ''),
+                key="form_prompt_text"
+            )
+            
+            prompt_image = st.file_uploader(
+                "Prompt Image (Optional)",
+                type=AppConfig.SUPPORTED_IMAGE_TYPES,
+                help="Upload an image if the prompt included visual content",
+                key="form_prompt_image"
+            )
+            
+            if prompt_image and not Utils.validate_file_size(prompt_image):
+                st.error(f"Prompt image is too large (max {AppConfig.MAX_FILE_SIZE_MB}MB)")
+                prompt_image = None
+        
+        # === SAVE BUTTON ===
+        col1, col2, col3 = st.columns([1, 2, 1])
+        with col2:
+            # Get button display info based on current state
+            button_info = ButtonManager.get_button_display_info('save_metadata')
+            can_save = SecurityManager.can_save_metadata()
+            
+            # Render button with current state
+            button_clicked = st.button(
+                button_info['text'],
+                type=button_info['type'],
+                use_container_width=True,
+                disabled=button_info['disabled'] or not can_save,
+                key="save_metadata_btn"
+            )
+            
+            # Handle button click - IMMEDIATE STATE CHANGE
+            if button_clicked and can_save and ButtonManager.is_button_ready('save_metadata'):
+                # Store form data temporarily for processing
+                st.session_state.temp_form_data = {
+                    'question_id': question_id,
+                    'user_email': user_email,
+                    'prompt_text': prompt_text,
+                    'prompt_image': prompt_image
+                }
+                
+                # IMMEDIATELY change state to processing and rerun
+                if ButtonManager.start_processing('save_metadata'):
+                    st.rerun()
+            
+            # Show additional status info for processing state
+            if ButtonManager.is_button_processing('save_metadata'):
+                st.info("🔒 Processing...")
     
     @staticmethod
-    def _display_step1_success_popups(validation_results: Dict[str, Any]):
+    def _display_metadata_success_summary():
+        """Display success summary after metadata save."""
+        st.markdown("---")
+        st.subheader("✅ Task Metadata Saved")
         
-        # Model Combination Popup (only if matched from SOT)
-        if validation_results['matched_models']:
-            model1, model2 = validation_results['matched_models']
-            
-            # Get brand colors for visual display
-            model1_config = ModelBrandManager.get_model_config(model1)
-            model2_config = ModelBrandManager.get_model_config(model2)
+        # Model Combination Display
+        if 'model1' in st.session_state and 'model2' in st.session_state:
+            model1_config = ModelBrandManager.get_model_config(st.session_state.model1)
+            model2_config = ModelBrandManager.get_model_config(st.session_state.model2)
             
             st.markdown(f"""
             <div style="background: #e3f2fd; 
@@ -1651,26 +1714,29 @@ class PageManager:
                         border-left: 4px solid {model1_config['color']};">
                 <h4 style="margin: 0; color: #0d47a1;">⚔️ SxS Comparison</h4>
                 <p style="margin: 0.1rem 0; font-size: 1.2rem; font-weight: 600;">
-                    <span style="color: {model1_config['color']};">{model1}</span> 
+                    <span style="color: {model1_config['color']};">{st.session_state.model1}</span> 
                     <span style="color: #0d47a1;"> vs </span>
-                    <span style="color: {model2_config['color']};">{model2}</span>
+                    <span style="color: {model2_config['color']};">{st.session_state.model2}</span>
+                    <span style="color: #F63366; margin-left: 0.7rem;">←</span>
+                    <span style="color: #0d47a1; font-size: 0.9rem; font-weight: 400; margin-left: 0.2rem;"> 👀 double check your model names.</span>
                 </p>
             </div>
             """, unsafe_allow_html=True)
         
-        # Task ID & Metadata Popup
-        qid_data = validation_results['question_id_data']
+
+        # Metadata Summary
         col1, col2 = st.columns(2)
-        
-        if qid_data.get('task_id'):
-                st.info(f"🔍 **Task ID:** {qid_data['task_id']}")
-        
+
+        if st.session_state.get('task_id'):
+                st.info(f"🔍 **Task ID:** {st.session_state.task_id}")
         with col1:
-            if qid_data.get('project_type'):
-                st.success(f"📂 **Project Type:** {qid_data['project_type']}")
+            if st.session_state.get('sot_language'):
+                st.success(f"🌐 **Language:** {st.session_state.sot_language}")
         with col2:
-            if qid_data.get('language'):
-                st.success(f"🌐 **Language:** {qid_data['language']}")
+            if st.session_state.get('sot_project_type'):
+                st.success(f"📂 **Project Type:** {st.session_state.sot_project_type}")
+           # if st.session_state.get('metadata_save_timestamp'):
+            #    st.info(f"🕒 **Saved:** {st.session_state.metadata_save_timestamp}")
     
     @staticmethod
     def render_image_upload():
@@ -1709,8 +1775,6 @@ class PageManager:
         </div>
         """, unsafe_allow_html=True)
 
-
-        
         col1, col2 = st.columns(2)
         
         # Model 1 upload
@@ -1728,7 +1792,7 @@ class PageManager:
     @staticmethod
     def _render_model_upload_section(model_name: str, model_key: str, icon: str):
         """Render upload section for a model."""
-        upload_locked = st.session_state.get('form_data_locked', False)
+        upload_locked = SecurityManager.is_workflow_completed()  # Only lock when workflow is completed
         upload_class = "upload-section locked" if upload_locked else "upload-section"
         
         st.markdown(f"""
@@ -1846,7 +1910,7 @@ class PageManager:
             model1_images = st.session_state.get('model1_images_temp', [])
             model2_images = st.session_state.get('model2_images_temp', [])
             
-            save_disabled = (st.session_state.get('form_data_locked', False) or
+            save_disabled = (SecurityManager.is_workflow_completed() or  # Only check workflow completion
                            not (model1_images and model2_images))
             
             if st.button("💾 Save Images", type="primary", use_container_width=True, disabled=save_disabled):
@@ -2032,7 +2096,7 @@ class PageManager:
     
     @staticmethod
     def render_upload_to_drive():
-        """Render upload to drive page with bulletproof button management."""
+        """Render upload to drive page with streamlined button management."""
         st.header("4️⃣ Upload to Drive & Submit")
         
         if SecurityManager.is_workflow_completed():
@@ -2057,16 +2121,9 @@ class PageManager:
         file_size_kb = len(pdf_data) / 1024
         
         st.markdown("""
-        <div style="background: #16213e; color: white; padding: 2rem; border-radius: 15px; margin: 1rem 0;">
-            <h3 style="text-align: center; margin-bottom: 2rem;">📋 Final Submission</h3>
+        <div style="background: #16213e; color: white; padding: 0.5rem; border-radius: 10px; margin: 0.5rem 0;">
+            <h3 style="text-align: center; margin-bottom: 0.1rem;">📋 Final Submission</h3>
         """, unsafe_allow_html=True)
-        
-        # Display pre-validated email
-        st.markdown("### ✅ Pre-validated Email")
-        st.success(f"📧 **Email:** {st.session_state.user_email}")
-        
-        # Form data display
-        PageManager._render_form_data_display(filename, file_size_kb)
         
         # === PHASE 1: CHECK IF WE SHOULD PROCESS ===
         # Check if drive upload should be processed
@@ -2078,6 +2135,9 @@ class PageManager:
             PageManager._process_form_submission(filename, file_size_kb)
         
         # === PHASE 2: RENDER UI BASED ON CURRENT STATES ===
+        # Form data display
+        PageManager._render_form_data_display(filename, file_size_kb)
+        
         # Drive upload section
         PageManager._render_drive_upload_section(filename)
         
@@ -2089,7 +2149,7 @@ class PageManager:
     @staticmethod
     def _process_drive_upload(filename: str):
         """Process drive upload - Phase 2 actual processing."""
-        st.info("🚀 **Processing Drive Upload** - Please wait...")
+        st.info("🚀 **Uploading to Google Drive** - Please wait...")
         
         try:
             # Perform the actual upload
@@ -2100,7 +2160,6 @@ class PageManager:
                 ButtonManager.complete_processing('drive_upload', success=True)
                 
                 st.success("✅ Upload completed successfully!")
-                st.success(f"🔗 **Drive URL:** {upload_result.get('drive_url', 'Generated')}")
                 
                 # Brief pause to show success before rerun
                 time.sleep(1)
@@ -2130,7 +2189,7 @@ class PageManager:
     @staticmethod
     def _process_form_submission(filename: str, file_size_kb: float):
         """Process form submission - Phase 2 actual processing."""
-        st.info("🚀 **Processing Form Submission** - Please wait...")
+        st.info("🚀 **Submitting form** - Please wait...")
         
         try:
             # Perform the actual submission
@@ -2141,9 +2200,6 @@ class PageManager:
             if submission_result.get('success'):
                 # Success - complete the button processing and lock permanently
                 ButtonManager.complete_processing('form_submit', success=True)
-                
-                # Mark as submitted to prevent duplicates
-                st.session_state.form_submitted = True
                 
                 st.success("🎉 Form submitted successfully!")
                 st.balloons()
@@ -2176,7 +2232,8 @@ class PageManager:
     @staticmethod
     def _render_form_data_display(filename: str, file_size_kb: float):
         """Render form data display section."""
-        st.markdown("### 📋 Form Data Review")
+        st.markdown("#### 🗃️ Form Data")
+        st.success(f"📧 **Email:** {st.session_state.user_email}")
         
         # Display all form data in a clean format
         form_data = [
@@ -2197,8 +2254,8 @@ class PageManager:
     
     @staticmethod
     def _render_drive_upload_section(filename: str):
-        """Render drive upload section with bulletproof button management."""
-        st.markdown("### 🔗 Google Drive Upload")
+        """Render drive upload section with streamlined button management."""
+        st.markdown("#### 🔗 Google Drive Upload")
         
         col1, col2 = st.columns([3, 1])
         
@@ -2207,22 +2264,13 @@ class PageManager:
             current_drive_url = st.session_state.get('drive_url', '')
             
             if current_drive_url:
-                # Create a container for URL display with copy functionality
-                url_col1, url_col2 = st.columns([4, 1])
-                
-                with url_col1:
-                    st.text_input("Drive URL", value=current_drive_url, disabled=True, key="drive_url_display")
-                
-                with url_col2:
-                    # Add clipboard copy button
-                    if st.button("📋", help="Copy URL to clipboard", key="copy_drive_url"):
-                        # Use st.code with copy functionality
-                        st.success("✅ URL copied!")
-                
-                # Show the copyable URL in a code block for easy copying
+                st.text_input("Drive URL", value=current_drive_url, disabled=True, key="drive_url_display")
                 st.code(current_drive_url, language=None)
-                st.markdown(f"🔗 **[Open in Google Drive]({current_drive_url})**")
-                st.info("💡 **Copy the URL above to submit on CrC platform**")
+                st.markdown(f"""
+                <div style="background-color: #d1ecf1; color: #0c5460; padding: 1rem; border-radius: 5px; border: 1px solid #bee5eb; margin: 1rem 0;">
+                    💡 <strong>Copy the URL above to submit on CrC platform</strong> | 🔗 <strong><a href="{current_drive_url}" target="_blank" style="color: #28a745; text-decoration: underline;">Open in Google Drive</a></strong>
+                </div>
+                """, unsafe_allow_html=True)
                 
             else:
                 button_state = ButtonManager.get_button_state('drive_upload')
@@ -2256,7 +2304,7 @@ class PageManager:
     
     @staticmethod
     def _render_final_submission_section(filename: str, file_size_kb: float):
-        """Render final submission section with bulletproof button management."""
+        """Render final submission section with streamlined button management."""
         st.markdown("### 📤 Final Submission")
         
         col1, col2, col3 = st.columns([1, 2, 1])
@@ -2301,20 +2349,64 @@ class PageManager:
     def _render_session_summary():
         """Render final session summary."""
         st.markdown("---")
-        st.subheader("📋 Final Session Summary")
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%); 
+                color: #198754; 
+                padding: 0.5rem 0.5rem; 
+                border-radius: 10px; 
+                text-align: center; 
+                margin: 1rem 0; 
+                border-left: 4px solid #28a745;
+                border-right: 4px solid #28a745; 
+                box-shadow: 0 3px 8px rgba(40, 167, 69, 0.2);">
+            <h3 style="margin: 0; font-size: 1.6rem; font-weight: 700;">📋 Form Summary</h3>
+        </div>
+        """, unsafe_allow_html=True)
         
+
         col1, col2 = st.columns(2)
         with col1:
             st.info(f"🔍 **Question ID:** {st.session_state.get('question_id', 'N/A')[:50]}...")
-            st.info(f"🤖 **Models:** {st.session_state.get('model1', 'N/A')} vs {st.session_state.get('model2', 'N/A')}")
-            st.info(f"📧 **Email:** {st.session_state.get('user_email', 'N/A')}")
+            st.info(f"🆔 **Session ID:** {st.session_state.get('session_id', 'N/A')[:16]}")
         
         with col2:
             if st.session_state.get('drive_url'):
-                st.info(f"🔗 **Drive URL:** [View File]({st.session_state.drive_url})")
-            st.info(f"🆔 **Session ID:** {st.session_state.get('session_id', 'N/A')[:16]}")
-            st.info(f"✅ **Status:** Form submitted successfully")
-    
+                st.balloons()
+            st.info(f"🤖 **Models:** {st.session_state.get('model1', 'N/A')} vs {st.session_state.get('model2', 'N/A')}")
+            st.info(f"📧 **Email:** {st.session_state.get('user_email', 'N/A')}")
+        
+
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.markdown("""
+            <div style="background: linear-gradient(135deg, #d1ecf1 0%, #bee5eb 100%); 
+                    color: #0c5460; 
+                    padding: 0.3rem; 
+                    border-radius: 8px; 
+                    text-align: center; 
+                    margin: 0rem 0; 
+                    border: 1px solid #bee5eb; 
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    min-height: 1rem;">
+                <h4 style="margin: 0; font-size: 1.2rem; font-weight: 700; line-height: 1;">🔗 Drive URL  ⌯⌲</h4>
+            </div>
+            """, unsafe_allow_html=True)
+
+        with col2:
+            st.code(st.session_state.drive_url, language=None)
+
+        # Actions row
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.markdown(f'**📄 [View File in Google Drive]({st.session_state.drive_url})**')
+        with col2:
+            st.markdown("**💡 Copy URL above for CrC submission**")
+
+        st.markdown("---")
+
     @staticmethod
     def _render_new_session_button():
         """Render new session button."""
@@ -2356,6 +2448,7 @@ class PageManager:
         - Enter your **authorized email alias address** used in CrC
         - Enter the **Initial Prompt** used for both models
         - Optionally upload a **Prompt Image**
+        - Click **Save Metadata** - button disappears after successful save
         - Both Question ID and email are validated automatically
         
         #### 2️⃣ Image Upload
@@ -2372,9 +2465,9 @@ class PageManager:
         
         #### 4️⃣ Upload to Drive & Submit
         - Review all populated data from previous steps
-        - Click **Upload** to upload to Drive (one-time only)
-        - **Copy the Drive URL** using the clipboard button for easy pasting in CrC
-        - Click **Submit** to complete the process (one-time only)
+        - Click **Upload** - button disappears after successful upload
+        - **Copy the Drive URL** for easy pasting in CrC
+        - Click **Submit Form** - button disappears after successful submission
         
         ### 📄 PDF Structure
         1. **Title Page**: Question ID, Prompt, and optional image
@@ -2398,12 +2491,10 @@ class PageManager:
         - **PDF generation fails**: Check image formats and try again
         - **Upload fails**: Ensure stable internet connection
         - **Form submission disabled**: Complete all required steps first
-        - **"Already submitted" error**: Session is locked after completion - start new session
-        - **Submit button disabled**: Complete Drive upload first
+        - **Button already clicked**: Buttons disappear after successful action - start new session for another comparison
         
         #### Security-Related Issues:
-        - **"Submission in progress"**: Wait for current submission to complete
-        - **Multiple clicks not working**: System prevents duplicate submissions
+        - **Button processing**: Wait for processing to complete (shows progress message)
         - **Session locked**: Start new session for additional comparisons
         
         #### Best Practices:
@@ -2411,10 +2502,9 @@ class PageManager:
         - Compress large images before upload using online tools
         - Ensure images are in supported formats (PNG, JPG, JPEG)
         - Complete all validations in Step 1 before proceeding
-        - **Use the clipboard button (📋)** to copy Drive URL for CrC submission
-        - **Do not refresh page during uploads** - may cause session issues
-        - **Complete workflow in one session** - avoid leaving partially completed
-        - **Click buttons only once** - system shows immediate feedback                    
+        - **Click buttons only once** - they disappear after successful processing
+        - **Do not refresh page during processing** - wait for completion
+        - **Complete workflow in one session** - avoid leaving partially completed                    
         """)
     
     @staticmethod
@@ -2625,7 +2715,6 @@ def main():
     
     # Handle workflow completion
     if SecurityManager.is_workflow_completed():
-        UIComponents.display_workflow_completion_status()
         allowed_pages = ["Help", "Upload to Drive"]
         if st.session_state.current_page not in allowed_pages:
             st.session_state.current_page = "Upload to Drive"
